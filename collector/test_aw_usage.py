@@ -123,6 +123,54 @@ class UsageTests(unittest.TestCase):
         self.assertEqual(cat(rep, "app:ghostty"), 40.0)
         self.assertEqual(rep["engaged_seconds"], 40.0)
 
+    def test_android_packages_match_mac_categories(self):
+        start = at(15)
+        rep = report(
+            windows={
+                "aw-watcher-android": [
+                    event(start, 100, app="व्हाट्सएप", package="com.whatsapp"),
+                    event(start + timedelta(seconds=100), 50, app="Netflix", package="com.netflix.mediaclient"),
+                    event(
+                        start + timedelta(seconds=150),
+                        40,
+                        app="YT Music",
+                        package="com.google.android.apps.youtube.music",
+                    ),
+                    event(start + timedelta(seconds=190), 30, app="System UI", package="com.android.systemui"),
+                ]
+            }
+        )
+        self.assertEqual(cat(rep, "whatsapp"), 100.0)
+        self.assertEqual(cat(rep, "netflix"), 50.0)
+        self.assertEqual(cat(rep, "youtube"), 40.0)
+        self.assertEqual(rep["screen_seconds"], 190.0)
+        self.assertEqual(rep["engaged_seconds"], 190.0)
+        self.assertFalse(rep["afk_available"])
+
+    def test_android_web_bucket_labels_chrome(self):
+        start = at(17)
+        rep = report(
+            windows={
+                "aw-watcher-android": [
+                    event(start, 80, app="Chrome", package="com.android.chrome"),
+                ]
+            },
+            web={
+                "aw-watcher-android-web": [
+                    event(
+                        start,
+                        80,
+                        url="youtube.com/watch?v=abc",
+                        title="a video",
+                        browser="com.android.chrome",
+                    )
+                ]
+            },
+        )
+        self.assertEqual(cat(rep, "youtube"), 80.0)
+        self.assertEqual(rep["screen_seconds"], 80.0)
+        self.assertEqual(aw_usage.domain_of("youtube.com/watch?v=abc"), "youtube.com")
+
     def test_zen_browser_uses_firefox_tab_urls(self):
         start = at(16)
         rep = report(

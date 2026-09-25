@@ -114,12 +114,49 @@ BROWSER_APPS = {
     "arc": "arc",
     "orion": "orion",
     "vivaldi": "vivaldi",
+    "brave": "brave",
     "opera": "opera",
     # Zen is a Firefox build. The ActivityWatch extension records it in
     # the firefox web bucket, while macOS reports the app as Zen.
     "zen": "firefox",
     "zen browser": "firefox",
 }
+
+# Android reports a package name. The label can be translated, so the
+# package is what lines up with the Mac categories.
+PACKAGE_CATEGORIES = {
+    "com.google.android.youtube": "youtube",
+    "com.google.android.apps.youtube.music": "youtube",
+    "com.google.android.apps.youtube.kids": "youtube",
+    "com.netflix.mediaclient": "netflix",
+    "in.startv.hotstar": "hotstar",
+    "com.jio.media.jiobeats": "hotstar",
+    "com.instagram.android": "instagram",
+    "com.whatsapp": "whatsapp",
+    "com.whatsapp.w4b": "whatsapp",
+    "com.spotify.music": "spotify",
+    "com.discord": "discord",
+    "com.openai.chatgpt": "chatgpt",
+    "com.github.android": "github",
+    "com.zhiliaoapp.musically": "tiktok",
+    "com.ss.android.ugc.trill": "tiktok",
+    "com.twitter.android": "twitter",
+    "com.reddit.frontpage": "reddit",
+    "com.facebook.katana": "facebook",
+    "com.amazon.avod.thirdpartyclient": "primevideo",
+}
+
+PACKAGE_BROWSERS = {
+    "com.android.chrome": "chrome",
+    "org.mozilla.firefox": "firefox",
+    "com.brave.browser": "brave",
+    "com.sec.android.app.sbrowser": "samsung",
+    "com.opera.browser": "opera",
+    "com.microsoft.emmx": "edge",
+}
+
+# Lock screen and the shade. Time here is not an app the user opened.
+SKIP_PACKAGES = frozenset({"com.android.systemui", "com.android.keyguard"})
 
 # Mac lock UI. Time here is not screen time, same idea as Pact's overlay.
 SKIP_APPS = frozenset({"loginwindow", "screensaverengine"})
@@ -147,6 +184,7 @@ class Span:
     url: str = ""
     domain: str = ""
     browser: str = ""
+    package: str = ""
     category: str = ""
 
     def copy(self, **changes: object) -> "Span":
@@ -165,6 +203,10 @@ def browser_key(app: str) -> str:
     return BROWSER_APPS.get((app or "").strip().casefold(), "")
 
 
+def browser_for_package(package: str) -> str:
+    return PACKAGE_BROWSERS.get(package or "", "")
+
+
 def browser_from_bucket(bucket_id: str) -> str:
     match = _WEB_BUCKET_RE.match(bucket_id or "")
     if not match:
@@ -176,6 +218,9 @@ def domain_of(url: str) -> str:
     raw = (url or "").strip()
     if not raw or raw.startswith(("about:", "chrome:", "edge:", "moz-extension:", "file:")):
         return ""
+    # Android's web watcher stores the address bar without a scheme.
+    if "://" not in raw:
+        raw = "https://" + raw
     try:
         host = urlparse(raw).hostname or ""
     except ValueError:
@@ -208,12 +253,15 @@ def app_slug(app: str) -> str:
     return slug or "unknown"
 
 
-def classify(app: str, title: str, domain: str, browser: str) -> str:
+def classify(app: str, title: str, domain: str, browser: str, package: str = "") -> str:
     if domain:
         hit = match_domain(domain)
         if hit:
             return hit
         return "site:" + domain
+    hit = PACKAGE_CATEGORIES.get(package or "")
+    if hit:
+        return hit
     hit = match_keyword(app, APP_CATEGORIES)
     if hit:
         return hit
@@ -334,6 +382,7 @@ def _same_slice(a: Span, b: Span) -> bool:
         and a.url == b.url
         and a.domain == b.domain
         and a.browser == b.browser
+        and a.package == b.package
         and a.category == b.category
     )
 
@@ -378,7 +427,8 @@ def window_spans(events: list[dict], now: float, lo: float, hi: float) -> list[S
             continue
         data = event.get("data") or {}
         app = str(data.get("app") or "")
-        if app.casefold() in SKIP_APPS:
+        package = str(data.get("package") or "")
+        if app.casefold() in SKIP_APPS or package in SKIP_PACKAGES:
             continue
         title = str(data.get("title") or "")[:300]
         spans.append(
@@ -387,7 +437,8 @@ def window_spans(events: list[dict], now: float, lo: float, hi: float) -> list[S
                 end=clipped[1],
                 app=app,
                 title=title,
-                browser=browser_key(app),
+                package=package,
+                browser=browser_key(app) or browser_for_package(package),
             )
         )
     return spans
@@ -458,6 +509,7 @@ def web_spans(events: list[dict], browser: str, now: float, lo: float, hi: float
         data = event.get("data") or {}
         url = str(data.get("url") or "")[:2000]
         title = str(data.get("title") or "")[:300]
+        raw_browser = str(data.get("browser") or "")
         spans.append(
             Span(
                 start=clipped[0],
@@ -465,7 +517,7 @@ def web_spans(events: list[dict], browser: str, now: float, lo: float, hi: float
                 title=title,
                 url=url,
                 domain=domain_of(url),
-                browser=browser,
+                browser=browser or browser_for_package(raw_browser) or browser_key(raw_browser),
             )
         )
     return resolve_overlaps(spans)
@@ -571,6 +623,7 @@ def build_report(
     day_start: datetime,
     day_end: datetime,
     aw_version: str = "",
+    platform: str = "macos",
 ) -> dict:
     if now.tzinfo is None or day_start.tzinfo is None:
         raise ValueError("now and day_start must be timezone-aware")
@@ -609,17 +662,28 @@ def build_report(
     webs_by_browser: dict[str, list[Span]] = {}
     for bucket_id, events in web_events.items():
         browser = browser_from_bucket(bucket_id)
-        if not browser:
-            continue
-        webs_by_browser.setdefault(browser, []).extend(
-            web_spans(events, browser, now_ts, lo, hi)
-        )
+        if browser:
+            groups = {browser: events}
+        else:
+            # aw-watcher-android-web puts the browser package on each event.
+            groups = {}
+            for event in events:
+                raw = str((event.get("data") or {}).get("browser") or "")
+                key = browser_for_package(raw) or browser_key(raw)
+                if key:
+                    groups.setdefault(key, []).append(event)
+        for key, grouped in groups.items():
+            webs_by_browser.setdefault(key, []).extend(
+                web_spans(grouped, key, now_ts, lo, hi)
+            )
     for browser, spans in list(webs_by_browser.items()):
         webs_by_browser[browser] = resolve_overlaps(spans)
 
     labeled = paint_urls(windows, webs_by_browser)
     for span in labeled:
-        span.category = classify(span.app, span.title, span.domain, span.browser)
+        span.category = classify(
+            span.app, span.title, span.domain, span.browser, span.package
+        )
 
     counted: list[Span] = []
     for span in labeled:
@@ -674,7 +738,7 @@ def build_report(
         "device_id": device_id,
         "hostname": hostname,
         "device_name": device_name or hostname,
-        "platform": "macos",
+        "platform": platform,
         "tz": tz_name,
         "day": day,
         "gathered_at": now.isoformat(timespec="seconds"),

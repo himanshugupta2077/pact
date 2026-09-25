@@ -147,13 +147,16 @@ def fmt_seconds(seconds: float) -> str:
     return f"{secs}s"
 
 
-def get_json(url: str):
-    request = urllib.request.Request(url, headers={"Accept": "application/json"})
+def get_json(url: str, api_key: str = ""):
+    headers = {"Accept": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    request = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(request, timeout=30) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
-def fetch_events(base: str, bucket_id: str, start: datetime, end: datetime) -> list:
+def fetch_events(base: str, bucket_id: str, start: datetime, end: datetime, api_key: str = "") -> list:
     events: list = []
     seen: set = set()
     cursor_end = end.astimezone(timezone.utc)
@@ -166,7 +169,7 @@ def fetch_events(base: str, bucket_id: str, start: datetime, end: datetime) -> l
             f"?limit=5000&start={urllib.parse.quote(start_s)}"
             f"&end={urllib.parse.quote(end_s)}"
         )
-        batch = get_json(url)
+        batch = get_json(url, api_key)
         if not isinstance(batch, list) or not batch:
             break
         oldest = None
@@ -192,17 +195,29 @@ def fetch_events(base: str, bucket_id: str, start: datetime, end: datetime) -> l
     return events
 
 
-def gather(aw_url: str, day: str | None) -> dict:
+def gather(
+    aw_url: str,
+    day: str | None,
+    *,
+    api_key: str = "",
+    platform: str = "macos",
+    device_name: str | None = None,
+    tz_name: str | None = None,
+) -> dict:
     base = aw_url.rstrip("/")
     try:
-        info = get_json(f"{base}/api/0/info")
-        buckets = get_json(f"{base}/api/0/buckets/")
+        info = get_json(f"{base}/api/0/info", api_key)
+        buckets = get_json(f"{base}/api/0/buckets/", api_key)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            raise SystemExit(f"ActivityWatch at {base} rejected the API key") from exc
+        raise SystemExit(f"ActivityWatch at {base} returned HTTP {exc.code}") from exc
     except urllib.error.URLError as exc:
         raise SystemExit(f"ActivityWatch is not reachable at {base} ({exc})") from exc
     if not isinstance(buckets, dict):
         raise SystemExit(f"Unexpected buckets payload from {base}")
 
-    tz_name = local_tz_name()
+    tz_name = tz_name or local_tz_name()
     try:
         tz = ZoneInfo(tz_name)
     except Exception as exc:
@@ -230,7 +245,7 @@ def gather(aw_url: str, day: str | None) -> dict:
         kind = str((bucket or {}).get("type") or "")
         if kind not in {"currentwindow", "afkstatus", "web.tab.current"}:
             continue
-        events = fetch_events(base, bucket_id, query_start, query_end)
+        events = fetch_events(base, bucket_id, query_start, query_end, api_key)
         meta.append({"id": bucket_id, "type": kind, "events": len(events)})
         if kind == "currentwindow":
             window_events[bucket_id] = events
@@ -242,13 +257,22 @@ def gather(aw_url: str, day: str | None) -> dict:
     device_id = str(info.get("device_id") or "").strip()
     if not aw_usage.DEVICE_RE.match(device_id):
         raise SystemExit(f"ActivityWatch device_id is unusable: {device_id!r}")
-    hostname = str(info.get("hostname") or "mac").strip() or "mac"
+    hostname = str(info.get("hostname") or "").strip()
+    if hostname in {"", "localhost", "unknown"}:
+        for bucket in buckets.values():
+            host = str((bucket or {}).get("hostname") or "").strip()
+            if host and host not in {"unknown", "localhost"}:
+                hostname = host
+                break
+    if not hostname:
+        hostname = "device"
     # Today stops at the current clock. A past day includes that whole day.
     as_of = now if day_start.date() == now.date() else day_end
     return aw_usage.build_report(
         device_id=device_id,
         hostname=hostname,
-        device_name=computer_name() or hostname,
+        device_name=device_name or computer_name() or hostname,
+        platform=platform,
         tz_name=tz_name,
         day=day,
         window_events=window_events,
@@ -375,6 +399,11 @@ def install_agent() -> None:
   <integer>300</integer>
   <key>RunAtLoad</key>
   <true/>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+  </dict>
   <key>StandardOutPath</key>
   <string>{log_path}</string>
   <key>StandardErrorPath</key>

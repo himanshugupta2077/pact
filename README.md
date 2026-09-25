@@ -67,3 +67,15 @@ On the VPS:
 - `/var/lib/pact/activity/summary/<day>.json` — sum across every device that has shipped that day
 
 YouTube in a browser and the YouTube or JioHotstar apps use the same category name, so a later phone or laptop collector adds to the same total. Chrome and Safari count from the window title until their ActivityWatch browser extensions are installed.
+
+## Nothing Phone
+
+ActivityWatch on the phone (`net.activitywatch.android`) records foreground apps on the phone itself. With the phone plugged in over USB:
+
+```bash
+python3 collector/aw_android.py --dry-run
+python3 collector/aw_android.py
+python3 collector/aw_android.py --install   # every 5 minutes while it is plugged in
+```
+
+The phone's day is a second file under `/var/lib/pact/activity/`, and `summary/<day>.json` adds it to the Mac. WhatsApp, Netflix, Instagram, YouTube, and YouTube Music use the same category names as the Mac. Brave on the phone counts as Brave: ActivityWatch's Android URL watcher follows Chrome and Firefox, not Brave.
