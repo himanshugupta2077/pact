@@ -48,6 +48,8 @@ Phone must be authorized over ADB.
 
 Pact itself, the default launcher, Settings, phone/dialer, and the permission controller are never blocked so you can recover.
 
+A new agent should read [collector/AGENT.md](collector/AGENT.md) before changing the collectors.
+
 ## Mac screen time
 
 The phone still counts only itself. Other devices get screen time from [ActivityWatch](https://activitywatch.net/), which is already recording this Mac: frontmost app, idle, and Firefox or Zen tab URLs.
