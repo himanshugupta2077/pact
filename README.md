@@ -47,3 +47,23 @@ Phone must be authorized over ADB.
 7. To test override: Request override on the lock screen, then she approves at `/pact/`
 
 Pact itself, the default launcher, Settings, phone/dialer, and the permission controller are never blocked so you can recover.
+
+## Mac screen time
+
+The phone still counts only itself. Other devices get screen time from [ActivityWatch](https://activitywatch.net/), which is already recording this Mac: frontmost app, idle, and Firefox or Zen tab URLs.
+
+`collector/aw_ship.py` reads that local data, drops the lock screen, and counts a video (YouTube, JioHotstar, Netflix, and the same kind of app) even when you are not typing. Other apps count only while the keyboard or mouse is in use. Each run replaces today's file for this Mac on the toolkit VPS and refreshes the cross-device total.
+
+```bash
+cd ~/pact
+python3 collector/aw_ship.py --dry-run
+python3 collector/aw_ship.py
+python3 collector/aw_ship.py --install   # every 5 minutes, from ~/Library/Application Support/pact-aw
+```
+
+On the VPS:
+
+- `/var/lib/pact/activity/<device-id>/<day>.json` — this Mac, including app, window title, and URL
+- `/var/lib/pact/activity/summary/<day>.json` — sum across every device that has shipped that day
+
+YouTube in a browser and the YouTube or JioHotstar apps use the same category name, so a later phone or laptop collector adds to the same total. Chrome and Safari count from the window title until their ActivityWatch browser extensions are installed.
