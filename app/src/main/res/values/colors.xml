@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="pact_bg">#FF0E0D0B</color>
+    <color name="pact_ink">#FF0E0D0B</color>
+    <color name="pact_paper">#FFF4EFE6</color>
+    <color name="pact_rust">#FFC45C26</color>
+    <color name="ic_launcher_background">#FF1A1612</color>
+</resources>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Pact</string>
+    <string name="accessibility_service_description">Pact uses accessibility to see which app is on screen, including pop-up and picture-in-picture windows. When a limited app has used its time for today, Pact covers it and stops its playback. Pact does not read passwords or the contents of other apps.</string>
+    <string name="notification_listener_description">Pact uses notification access to pause background playback (YouTube, Spotify, and similar) when an app is over its limit. It does not read message text.</string>
+</resources>
