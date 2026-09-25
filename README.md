@@ -81,3 +81,14 @@ python3 collector/aw_android.py --install   # every 5 minutes while it is plugge
 ```
 
 The phone's day is a second file under `/var/lib/pact/activity/`, and `summary/<day>.json` adds it to the Mac. WhatsApp, Netflix, Instagram, YouTube, and YouTube Music use the same category names as the Mac. Brave on the phone counts as Brave: ActivityWatch's Android URL watcher follows Chrome and Firefox, not Brave.
+
+## Menu bar
+
+`menubar/` shows today's screen time for every device that has shipped a file. The menu bar is the total. Open it for the split by device, by work / entertainment / gaming / communication, and for an hour, app, or device graph. Categories can be changed there. Marks stay on this Mac. The app only reads the VPS.
+
+```bash
+cd ~/pact/menubar
+./build.sh --install
+```
+
+That builds `PactScreen.app`, copies it to `~/Applications`, and opens it. The day is Asia/Kolkata, same as the collectors. A work laptop shows up in the same menu once its collector ships a day file.

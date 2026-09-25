@@ -52,9 +52,15 @@ python3 collector/aw_android.py --dry-run
 
 The phone agent exits quietly when nothing is plugged in.
 
+## Menu bar
+
+`menubar/` is the Mac status-item app (`app.pact.screen`). It SSHs to `pact@pact-host` and runs `menubar/fetch_day.py` on the VPS. That script only reads the day files and prints totals, apps, and hour buckets. It does not write, and it does not print window titles or URLs. Do not restart `pact.service` for this.
+
+Bucket marks (work, entertainment, gaming, communication) stay on this Mac in `~/Library/Application Support/PactScreen/rules.json`. The VPS files are unchanged. A later laptop shows up on its own once a collector ships a device file for the Kolkata day.
+
 ## Not done
 
-- No "you have used YouTube too much" rule on the VPS. Summary files are the input for that.
+- No "you have used YouTube too much" rule on the VPS. The menu bar reads the day files and groups them. It does not write a limit back.
 - MSI laptop and office laptop are not collectors.
 - The phone does not push by itself. Its server is localhost-only.
 - Brave on the phone has no URLs. The Android web watcher only extracts Chrome, Firefox, Samsung Internet, Opera, and Edge (`WebWatcher.KNOWN_BROWSER_PACKAGES`). Brave time is `app:brave`.
