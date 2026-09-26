@@ -7,13 +7,15 @@ enum BucketPalette {
         switch id {
         case "work":
             return NSColor(srgbRed: 0.36, green: 0.56, blue: 0.95, alpha: 1)
+        case "personal":
+            return NSColor(srgbRed: 0.86, green: 0.40, blue: 0.52, alpha: 1)
         case "entertainment":
             return NSColor(srgbRed: 0.95, green: 0.57, blue: 0.24, alpha: 1)
         case "gaming":
             return NSColor(srgbRed: 0.64, green: 0.47, blue: 0.96, alpha: 1)
         case "communication":
             return NSColor(srgbRed: 0.20, green: 0.70, blue: 0.55, alpha: 1)
-        case "other":
+        case "other", "unassigned":
             return NSColor(srgbRed: 0.62, green: 0.64, blue: 0.68, alpha: 1)
         default:
             let palette = [
@@ -31,7 +33,6 @@ enum BucketPalette {
 @MainActor
 final class PanelController: NSViewController, NSTextFieldDelegate {
     private let model: AppModel
-    private var page = 0
     private var chart = 0
     private var filter = "all"
     private var query = ""
@@ -44,9 +45,9 @@ final class PanelController: NSViewController, NSTextFieldDelegate {
     private let freshnessLabel = Panel.caption("", size: 11, weight: .regular, color: .secondaryLabelColor)
     private let nextButton = Panel.icon("chevron.right", tip: "Next day")
     private let totalLabel = Panel.caption("", size: 34, weight: .semibold, color: .labelColor)
-    private let countLabel = Panel.caption("", size: 11, weight: .regular, color: .secondaryLabelColor)
+    private let countLabel = Panel.caption("", size: 13, weight: .regular, color: .secondaryLabelColor)
+    private let totalRow = Panel.hstack(8)
     private let emptyLabel = Panel.wrapping("")
-    private let pageChoice = ChoiceControl(titles: ["Today", "Categories"])
     private let todayStack = Panel.vstack(10)
     private let categoriesStack = Panel.vstack(12)
     private let menuStack = Panel.vstack(8)
@@ -57,7 +58,7 @@ final class PanelController: NSViewController, NSTextFieldDelegate {
     private let chartCaption = Panel.wrapping("")
     private let chartHost = NSView()
     private let hourChart = HourChartView()
-    private let filterStack = Panel.hstack(6)
+    private let filterStack = Panel.vstack(6)
     private let rowsStack = Panel.vstack(0)
     private let customStack = Panel.vstack(6)
     private let previewLabel = Panel.caption("", size: 13, weight: .medium, color: .labelColor)
@@ -193,10 +194,11 @@ final class PanelController: NSViewController, NSTextFieldDelegate {
 
     private func buildContent(_ content: NSStackView) {
         totalLabel.font = .systemFont(ofSize: 34, weight: .semibold)
-        pageChoice.onSelect = { [weak self] index in
-            self?.page = index
-            self?.render()
-        }
+        countLabel.setContentHuggingPriority(.required, for: .horizontal)
+        countLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        totalRow.addArrangedSubview(totalLabel)
+        totalRow.addArrangedSubview(Panel.spacer())
+        totalRow.addArrangedSubview(countLabel)
         chartChoice.onSelect = { [weak self] index in
             self?.chart = index
             self?.render()
@@ -218,7 +220,8 @@ final class PanelController: NSViewController, NSTextFieldDelegate {
         Panel.pin(deviceStack, to: todayStack)
         hourChart.heightAnchor.constraint(equalToConstant: 128).isActive = true
 
-        let intro = Panel.wrapping("YouTube, JioHotstar, and Netflix start as Entertainment. The terminal, Teams, and other websites start as Work. Change any row that doesn't fit. Marks stay on this Mac.")
+        let categoriesTitle = Panel.caption("Categories", size: 11, weight: .semibold, color: .secondaryLabelColor)
+        let intro = Panel.wrapping("YouTube, JioHotstar, and Netflix start as Entertainment. The terminal, Teams, and other websites start as Work. Change any row. Marks stay on this Mac.")
         searchField.placeholderString = "Search"
         searchField.delegate = self
         searchField.bezelStyle = .roundedBezel
@@ -233,6 +236,7 @@ final class PanelController: NSViewController, NSTextFieldDelegate {
         addRow.addArrangedSubview(bucketField)
         addRow.addArrangedSubview(add)
         bucketField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        categoriesStack.addArrangedSubview(categoriesTitle)
         categoriesStack.addArrangedSubview(intro)
         categoriesStack.addArrangedSubview(searchField)
         categoriesStack.addArrangedSubview(filterStack)
@@ -260,13 +264,11 @@ final class PanelController: NSViewController, NSTextFieldDelegate {
         Panel.pin(menuBody, to: menuStack)
 
         content.addArrangedSubview(emptyLabel)
-        content.addArrangedSubview(totalLabel)
-        content.addArrangedSubview(countLabel)
-        content.addArrangedSubview(pageChoice)
+        content.addArrangedSubview(totalRow)
         content.addArrangedSubview(todayStack)
         content.addArrangedSubview(categoriesStack)
         content.addArrangedSubview(menuStack)
-        for item in [emptyLabel, pageChoice, todayStack, categoriesStack, menuStack] {
+        for item in [emptyLabel, totalRow, todayStack, categoriesStack, menuStack] {
             Panel.pin(item, to: content)
         }
     }
@@ -339,7 +341,6 @@ final class PanelController: NSViewController, NSTextFieldDelegate {
         loginNote.stringValue = model.loginNote ?? ""
         loginNote.isHidden = model.loginNote == nil
         previewLabel.stringValue = model.menuTitle
-        pageChoice.selected = page
         chartChoice.selected = chart
         menuBody.isHidden = !showMenu
         menuToggle.title = showMenu ? "Menu bar  ▾" : "Menu bar  ▸"
@@ -347,11 +348,9 @@ final class PanelController: NSViewController, NSTextFieldDelegate {
         let rollup = model.dayRollup
         let hasTime = (rollup?.screenSeconds ?? 0) > 0
         emptyLabel.isHidden = hasTime
-        totalLabel.isHidden = !hasTime
-        countLabel.isHidden = !hasTime
-        pageChoice.isHidden = !hasTime
-        todayStack.isHidden = !hasTime || page != 0
-        categoriesStack.isHidden = !hasTime || page != 1
+        totalRow.isHidden = !hasTime
+        todayStack.isHidden = !hasTime
+        categoriesStack.isHidden = !hasTime
         menuStack.isHidden = !hasTime
         if !hasTime {
             if model.refreshing, rollup == nil {
@@ -376,16 +375,50 @@ final class PanelController: NSViewController, NSTextFieldDelegate {
 
     private func renderLegend(_ rollup: DayRollup) {
         Panel.clear(legendStack)
-        legendStack.addArrangedSubview(StackedBarView(parts: rollup.buckets))
-        Panel.pin(legendStack.arrangedSubviews[0], to: legendStack)
-        let whole = rollup.buckets.reduce(0) { $0 + $1.seconds }
-        for bucket in rollup.buckets {
-            legendStack.addArrangedSubview(bucketRow(bucket, whole: whole))
+        let parts = rollup.classes
+            .filter { $0.seconds > 0 }
+            .map { BucketTotal(id: $0.id, name: $0.name, seconds: $0.seconds) }
+        let bar = StackedBarView(parts: parts)
+        legendStack.addArrangedSubview(bar)
+        Panel.pin(bar, to: legendStack)
+        let whole = rollup.classes.reduce(0) { $0 + $1.seconds }
+        for klass in rollup.classes {
+            let header = classHeader(klass, whole: whole)
+            legendStack.addArrangedSubview(header)
+            Panel.pin(header, to: legendStack)
+            for bucket in klass.buckets {
+                let row = bucketRow(bucket, whole: whole, nested: true)
+                legendStack.addArrangedSubview(row)
+                Panel.pin(row, to: legendStack)
+            }
         }
     }
 
-    private func bucketRow(_ bucket: BucketTotal, whole: Double) -> NSView {
+    private func classHeader(_ klass: ClassTotal, whole: Double) -> NSView {
         let row = Panel.hstack(8)
+        let dot = DotView(color: BucketPalette.color(klass.id))
+        let name = Panel.caption(klass.name, size: 13, weight: .semibold, color: .labelColor)
+        let time = Panel.caption(formatDuration(klass.seconds), size: 13, weight: .semibold, color: .labelColor)
+        time.font = .monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
+        time.alignment = .right
+        let percent = Panel.caption(percentText(klass.seconds, of: whole), size: 12, weight: .regular, color: .secondaryLabelColor)
+        percent.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        percent.alignment = .right
+        percent.widthAnchor.constraint(equalToConstant: 40).isActive = true
+        row.addArrangedSubview(dot)
+        row.addArrangedSubview(name)
+        row.addArrangedSubview(Panel.spacer())
+        row.addArrangedSubview(time)
+        row.addArrangedSubview(percent)
+        time.setContentCompressionResistancePriority(.required, for: .horizontal)
+        return row
+    }
+
+    private func bucketRow(_ bucket: BucketTotal, whole: Double, nested: Bool = false) -> NSView {
+        let row = Panel.hstack(8)
+        if nested {
+            row.edgeInsets = NSEdgeInsets(top: 0, left: 16, bottom: 0, right: 0)
+        }
         let dot = DotView(color: BucketPalette.color(bucket.id))
         let name = Panel.caption(bucket.name, size: 13, weight: .regular, color: .labelColor)
         let time = Panel.caption(formatDuration(bucket.seconds), size: 13, weight: .regular, color: .labelColor)
@@ -427,9 +460,9 @@ final class PanelController: NSViewController, NSTextFieldDelegate {
 
     private func renderChart(_ rollup: DayRollup) {
         chartCaption.stringValue = [
-            "Hour by hour, Kolkata time. Colors are the buckets above.",
+            "Hour by hour, Kolkata time. Colors are Work and Personal.",
             "The program in front of you. A browser includes every site opened in it.",
-            "Each device, split into the same buckets.",
+            "Each device, split into Work and Personal.",
         ][chart]
         for view in chartHost.subviews { view.removeFromSuperview() }
         let child: NSView
@@ -442,7 +475,9 @@ final class PanelController: NSViewController, NSTextFieldDelegate {
             if rollup.hours.allSatisfy({ $0.seconds <= 0 }) {
                 child = Panel.wrapping("No hour-by-hour record for this day.")
             } else {
-                hourChart.hours = rollup.hours
+                hourChart.hours = rollup.hours.map { hour in
+                    HourTotal(hour: hour.hour, buckets: classParts(hour.buckets))
+                }
                 child = hourChart
             }
         }
@@ -505,9 +540,10 @@ final class PanelController: NSViewController, NSTextFieldDelegate {
             row.addArrangedSubview(name)
             row.addArrangedSubview(Panel.spacer())
             row.addArrangedSubview(time)
-            let bar = StackedBarView(parts: device.buckets)
+            let parts = classParts(device.buckets)
+            let bar = StackedBarView(parts: parts)
             let detail = Panel.caption(
-                device.buckets.map { "\($0.name) \(formatDuration($0.seconds))" }.joined(separator: " · "),
+                parts.map { "\($0.name) \(formatDuration($0.seconds))" }.joined(separator: " · "),
                 size: 11,
                 weight: .regular,
                 color: .secondaryLabelColor
@@ -527,6 +563,11 @@ final class PanelController: NSViewController, NSTextFieldDelegate {
     }
 
     private func renderCategories(_ rollup: DayRollup) {
+        var live = assignmentIds().union(["all"])
+        if rollup.categories.contains(where: { $0.bucketId == Bucket.unassigned.id }) {
+            live.insert(Bucket.unassigned.id)
+        }
+        if !live.contains(filter) { filter = "all" }
         renderFilters()
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let rows = rollup.categories.filter { row in
@@ -538,21 +579,47 @@ final class PanelController: NSViewController, NSTextFieldDelegate {
             return true
         }
         Panel.clear(rowsStack)
-        if rows.isEmpty {
+        let groups = categoryGroups(rows)
+        if groups.isEmpty {
             rowsStack.addArrangedSubview(Panel.wrapping("Nothing in this list."))
         }
-        for row in rows {
-            rowsStack.addArrangedSubview(categoryRow(row))
-            Panel.pin(rowsStack.arrangedSubviews.last!, to: rowsStack)
+        for group in groups {
+            if let title = group.title {
+                let header = groupHeader(title, seconds: group.seconds)
+                rowsStack.addArrangedSubview(header)
+                Panel.pin(header, to: rowsStack)
+                for row in group.rows {
+                    let line = categoryRow(row, nested: true)
+                    rowsStack.addArrangedSubview(line)
+                    Panel.pin(line, to: rowsStack)
+                }
+            } else if let row = group.rows.first {
+                let line = categoryRow(row, nested: false)
+                rowsStack.addArrangedSubview(line)
+                Panel.pin(line, to: rowsStack)
+            }
         }
-        renderCustomBuckets()
+        renderBucketList()
     }
 
     private func renderFilters() {
         Panel.clear(filterStack)
-        var tags: [(String, String)] = [("All", "all")]
+        var tags: [(String, String)] = [("All", "all"), (Bucket.work.name, Bucket.work.id)]
         tags += model.preferences.buckets.map { ($0.name, $0.id) }
-        tags.append(("Other", Bucket.other.id))
+        if model.dayRollup?.categories.contains(where: { $0.bucketId == Bucket.unassigned.id }) == true {
+            tags.append((Bucket.unassigned.name, Bucket.unassigned.id))
+        }
+        var row = Panel.hstack(6)
+        var used: CGFloat = 0
+        let maxWidth: CGFloat = 360
+        func flush() {
+            guard !row.arrangedSubviews.isEmpty else { return }
+            row.addArrangedSubview(Panel.spacer())
+            filterStack.addArrangedSubview(row)
+            Panel.pin(row, to: filterStack)
+            row = Panel.hstack(6)
+            used = 0
+        }
         for (title, id) in tags {
             let button = NSButton(title: title, target: self, action: #selector(filterTapped(_:)))
             button.identifier = NSUserInterfaceItemIdentifier(id)
@@ -560,14 +627,31 @@ final class PanelController: NSViewController, NSTextFieldDelegate {
             button.setButtonType(.momentaryPushIn)
             button.font = .systemFont(ofSize: 11, weight: filter == id ? .semibold : .regular)
             button.contentTintColor = filter == id ? .controlAccentColor : .labelColor
-            filterStack.addArrangedSubview(button)
+            let width = button.fittingSize.width
+            if used > 0, used + width > maxWidth { flush() }
+            row.addArrangedSubview(button)
+            used += width + 6
         }
-        filterStack.addArrangedSubview(Panel.spacer())
+        flush()
     }
 
-    private func categoryRow(_ row: CategoryRow) -> NSView {
+    private func groupHeader(_ title: String, seconds: Double) -> NSView {
         let line = Panel.hstack(8)
-        line.edgeInsets = NSEdgeInsets(top: 6, left: 0, bottom: 6, right: 0)
+        line.edgeInsets = NSEdgeInsets(top: 10, left: 0, bottom: 2, right: 0)
+        let name = Panel.caption(title, size: 13, weight: .semibold, color: .labelColor)
+        let time = Panel.caption(formatDuration(seconds), size: 13, weight: .semibold, color: .labelColor)
+        time.font = .monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
+        time.alignment = .right
+        line.addArrangedSubview(name)
+        line.addArrangedSubview(Panel.spacer())
+        line.addArrangedSubview(time)
+        time.setContentCompressionResistancePriority(.required, for: .horizontal)
+        return line
+    }
+
+    private func categoryRow(_ row: CategoryRow, nested: Bool) -> NSView {
+        let line = Panel.hstack(8)
+        line.edgeInsets = NSEdgeInsets(top: 6, left: nested ? 16 : 0, bottom: 6, right: 0)
         let dot = DotView(color: BucketPalette.color(row.bucketId))
         let name = Panel.caption(row.name, size: 13, weight: .regular, color: .labelColor)
         let sub = Panel.caption("\(row.category) · \(row.marked ? "marked" : "default")", size: 10, weight: .regular, color: .secondaryLabelColor)
@@ -579,11 +663,8 @@ final class PanelController: NSViewController, NSTextFieldDelegate {
         let popup = NSPopUpButton()
         popup.controlSize = .small
         popup.font = .systemFont(ofSize: 12)
-        let choices = model.preferences.buckets + [Bucket.other]
-        popup.addItems(withTitles: choices.map(\.name))
-        if let index = choices.firstIndex(where: { $0.id == row.bucketId }) {
-            popup.selectItem(at: index)
-        }
+        popup.autoenablesItems = false
+        fillAssignmentPopup(popup, row: row)
         popup.target = self
         popup.action = #selector(bucketPicked(_:))
         popup.identifier = NSUserInterfaceItemIdentifier(row.category)
@@ -604,14 +685,44 @@ final class PanelController: NSViewController, NSTextFieldDelegate {
         return line
     }
 
-    private func renderCustomBuckets() {
-        Panel.clear(customStack)
-        let custom = model.preferences.buckets.filter { bucket in
-            !Bucket.defaults.contains { $0.id == bucket.id }
+    private func assignmentIds() -> Set<String> {
+        Set([Bucket.work.id] + model.preferences.buckets.map(\.id))
+    }
+
+    private func fillAssignmentPopup(_ popup: NSPopUpButton, row: CategoryRow) {
+        popup.removeAllItems()
+        func add(_ bucket: Bucket) {
+            popup.addItem(withTitle: bucket.name)
+            popup.lastItem?.representedObject = bucket.id
+            popup.lastItem?.isEnabled = true
         }
-        guard !custom.isEmpty else { return }
-        customStack.addArrangedSubview(Panel.caption("Your buckets", size: 11, weight: .semibold, color: .secondaryLabelColor))
-        for bucket in custom {
+        add(Bucket.work)
+        if !model.preferences.buckets.isEmpty {
+            popup.menu?.addItem(.separator())
+        }
+        for bucket in model.preferences.buckets {
+            add(bucket)
+        }
+        if !assignmentIds().contains(row.bucketId) {
+            add(Bucket.unassigned)
+        }
+        if let item = popup.menu?.items.first(where: { ($0.representedObject as? String) == row.bucketId }) {
+            popup.select(item)
+        }
+    }
+
+    private func renderBucketList() {
+        Panel.clear(customStack)
+        customStack.addArrangedSubview(Panel.caption("Buckets", size: 11, weight: .semibold, color: .secondaryLabelColor))
+        let note = Panel.wrapping("Buckets sit under Personal. Assign a row to Work when that time should count as Work. Any bucket here can be removed.")
+        customStack.addArrangedSubview(note)
+        Panel.pin(note, to: customStack)
+        if model.preferences.buckets.isEmpty {
+            let empty = Panel.wrapping("No buckets yet. Time that is not Work stays in Personal until you add one.")
+            customStack.addArrangedSubview(empty)
+            Panel.pin(empty, to: customStack)
+        }
+        for bucket in model.preferences.buckets {
             let row = Panel.hstack(8)
             row.addArrangedSubview(DotView(color: BucketPalette.color(bucket.id)))
             row.addArrangedSubview(Panel.caption(bucket.name, size: 13, weight: .regular, color: .labelColor))
@@ -628,16 +739,15 @@ final class PanelController: NSViewController, NSTextFieldDelegate {
     }
 
     private func renderMenu(_ rollup: DayRollup) {
-        let ids = ["__total"] + model.preferences.buckets.map(\.id) + [Bucket.other.id]
+        let ids = ["__total", Bucket.work.id] + model.preferences.buckets.map(\.id)
         if ids != bucketToggleOrder {
             bucketToggleOrder = ids
             rebuildBucketToggles()
         }
         bucketToggles["__total"]?.state = model.preferences.showTotal ? .on : .off
-        for bucket in model.preferences.buckets {
+        for bucket in [Bucket.work] + model.preferences.buckets {
             bucketToggles[bucket.id]?.state = model.preferences.menuBucketIds.contains(bucket.id) ? .on : .off
         }
-        bucketToggles[Bucket.other.id]?.state = model.preferences.menuBucketIds.contains(Bucket.other.id) ? .on : .off
         deviceToggle.state = model.preferences.showDevices ? .on : .off
         deviceFieldStack.isHidden = !model.preferences.showDevices
         ensureDeviceFields(rollup.devices)
@@ -662,7 +772,7 @@ final class PanelController: NSViewController, NSTextFieldDelegate {
         bucketToggles = ["__total": total]
         guard let anchor = menuBody.arrangedSubviews.firstIndex(where: { $0 === total }) else { return }
         var insert = anchor + 1
-        for bucket in model.preferences.buckets + [Bucket.other] {
+        for bucket in [Bucket.work] + model.preferences.buckets {
             let toggle = NSButton(checkboxWithTitle: bucket.name, target: self, action: #selector(bucketMenuToggled(_:)))
             toggle.identifier = NSUserInterfaceItemIdentifier(bucket.id)
             menuBody.insertArrangedSubview(toggle, at: insert)
@@ -737,10 +847,6 @@ final class PanelController: NSViewController, NSTextFieldDelegate {
     @objc private func quit() { NSApp.terminate(nil) }
     @objc private func toggleMenu() { showMenu.toggle(); render() }
 
-    func selectPage(_ index: Int) {
-        page = index
-        render()
-    }
     @objc private func loginToggled() { model.setOpenAtLogin(loginToggle.state == .on) }
     @objc private func totalToggled(_ sender: NSButton) { model.setShowTotal(sender.state == .on) }
     @objc private func devicesToggled(_ sender: NSButton) { model.setShowDevices(sender.state == .on) }
@@ -757,10 +863,12 @@ final class PanelController: NSViewController, NSTextFieldDelegate {
 
     @objc private func bucketPicked(_ sender: NSPopUpButton) {
         guard let category = sender.identifier?.rawValue else { return }
-        let choices = model.preferences.buckets + [Bucket.other]
-        let index = sender.indexOfSelectedItem
-        guard choices.indices.contains(index) else { return }
-        model.setAssignment(category: category, bucketId: choices[index].id)
+        guard let id = sender.selectedItem?.representedObject as? String else { return }
+        if id == Bucket.unassigned.id {
+            model.resetAssignment(category)
+            return
+        }
+        model.setAssignment(category: category, bucketId: id)
     }
 
     @objc private func resetMark(_ sender: NSButton) {

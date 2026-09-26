@@ -75,10 +75,38 @@ public struct CategoryRow: Equatable, Sendable, Identifiable {
     }
 }
 
+public struct CategoryGroup: Equatable, Sendable {
+    /// Set for the URLs group. A named app or category has no title and one row.
+    public var title: String?
+    public var rows: [CategoryRow]
+
+    public var seconds: Double { rows.reduce(0) { $0 + $1.seconds } }
+
+    public init(title: String?, rows: [CategoryRow]) {
+        self.title = title
+        self.rows = rows
+    }
+}
+
+public struct ClassTotal: Equatable, Sendable, Identifiable {
+    public var id: String
+    public var name: String
+    public var seconds: Double
+    public var buckets: [BucketTotal]
+
+    public init(id: String, name: String, seconds: Double, buckets: [BucketTotal]) {
+        self.id = id
+        self.name = name
+        self.seconds = seconds
+        self.buckets = buckets
+    }
+}
+
 public struct DayRollup: Equatable, Sendable {
     public var day: String
     public var screenSeconds: Double
     public var buckets: [BucketTotal]
+    public var classes: [ClassTotal]
     public var devices: [DeviceTotal]
     public var apps: [AppTotal]
     public var hours: [HourTotal]
@@ -88,6 +116,7 @@ public struct DayRollup: Equatable, Sendable {
         day: String,
         screenSeconds: Double,
         buckets: [BucketTotal],
+        classes: [ClassTotal],
         devices: [DeviceTotal],
         apps: [AppTotal],
         hours: [HourTotal],
@@ -96,6 +125,7 @@ public struct DayRollup: Equatable, Sendable {
         self.day = day
         self.screenSeconds = screenSeconds
         self.buckets = buckets
+        self.classes = classes
         self.devices = devices
         self.apps = apps
         self.hours = hours
@@ -104,9 +134,10 @@ public struct DayRollup: Equatable, Sendable {
 }
 
 public func rollup(_ payload: DayPayload, preferences: Preferences) -> DayRollup {
-    let buckets = Preferences.mergingDefaults(preferences.buckets)
+    let buckets = Preferences.cleanedBuckets(preferences.buckets)
     var prefs = preferences
     prefs.buckets = buckets
+    let totalsBuckets = [Bucket.work] + buckets
 
     var categorySeconds: [String: Double] = [:]
     var appSeconds: [String: Double] = [:]
@@ -133,7 +164,7 @@ public func rollup(_ payload: DayPayload, preferences: Preferences) -> DayRollup
                 deviceId: device.deviceId,
                 name: name,
                 seconds: device.screenSeconds,
-                buckets: bucketTotals(perBucket, buckets: buckets)
+                buckets: bucketTotals(perBucket, buckets: totalsBuckets)
             )
         )
     }
@@ -167,7 +198,7 @@ public func rollup(_ payload: DayPayload, preferences: Preferences) -> DayRollup
         for (category, seconds) in hourCategory[hour] ?? [:] {
             perBucket[effectiveBucket(category, preferences: prefs).id, default: 0] += seconds
         }
-        return HourTotal(hour: hour, buckets: bucketTotals(perBucket, buckets: buckets))
+        return HourTotal(hour: hour, buckets: bucketTotals(perBucket, buckets: totalsBuckets))
     }
 
     let apps = appSeconds.map { AppTotal(name: $0.key, seconds: $0.value) }.sorted { lhs, rhs in
@@ -175,10 +206,19 @@ public func rollup(_ payload: DayPayload, preferences: Preferences) -> DayRollup
         return lhs.seconds > rhs.seconds
     }
 
+    let flat = bucketTotals(bucketSeconds, buckets: totalsBuckets)
+    let personalBuckets = flat.filter { $0.id != Bucket.work.id }
+    let personalSeconds = personalBuckets.reduce(0) { $0 + $1.seconds }
+    let classes = [
+        ClassTotal(id: Bucket.work.id, name: Bucket.work.name, seconds: bucketSeconds[Bucket.work.id] ?? 0, buckets: []),
+        ClassTotal(id: Bucket.personal.id, name: Bucket.personal.name, seconds: personalSeconds, buckets: personalBuckets),
+    ]
+
     return DayRollup(
         day: payload.day,
         screenSeconds: payload.devices.reduce(0) { $0 + $1.screenSeconds },
-        buckets: bucketTotals(bucketSeconds, buckets: buckets),
+        buckets: flat,
+        classes: classes,
         devices: deviceRows,
         apps: apps,
         hours: hours,
@@ -196,12 +236,54 @@ func bucketTotals(_ seconds: [String: Double], buckets: [Bucket]) -> [BucketTota
             rows.append(BucketTotal(id: bucket.id, name: bucket.name, seconds: value))
         }
     }
-    let other = seconds[Bucket.other.id] ?? 0
-    if other > 0 {
-        rows.append(BucketTotal(id: Bucket.other.id, name: Bucket.other.name, seconds: other))
-    }
-    for (id, value) in seconds.sorted(by: { $0.key < $1.key }) where value > 0 && !seen.contains(id) && id != Bucket.other.id {
-        rows.append(BucketTotal(id: id, name: id, seconds: value))
+    for (id, value) in seconds.sorted(by: { $0.key < $1.key }) where value > 0 && !seen.contains(id) {
+        let name = id == Bucket.unassigned.id ? Bucket.unassigned.name : id
+        rows.append(BucketTotal(id: id, name: name, seconds: value))
     }
     return rows
+}
+
+/// Folds bucket rows into the two fixed classes for charts.
+public func classParts(_ buckets: [BucketTotal]) -> [BucketTotal] {
+    let work = buckets.filter { $0.id == Bucket.work.id }.reduce(0) { $0 + $1.seconds }
+    let personal = buckets.filter { $0.id != Bucket.work.id }.reduce(0) { $0 + $1.seconds }
+    var parts: [BucketTotal] = []
+    if work > 0 {
+        parts.append(BucketTotal(id: Bucket.work.id, name: Bucket.work.name, seconds: work))
+    }
+    if personal > 0 {
+        parts.append(BucketTotal(id: Bucket.personal.id, name: Bucket.personal.name, seconds: personal))
+    }
+    return parts
+}
+
+/// Named categories stay single rows. Every `site:` row goes in one URLs group,
+/// whether its time is under a minute or over.
+public func categoryGroups(_ rows: [CategoryRow]) -> [CategoryGroup] {
+    var singles: [CategoryRow] = []
+    var sites: [CategoryRow] = []
+    for row in rows {
+        if row.category.hasPrefix("site:") {
+            sites.append(row)
+        } else {
+            singles.append(row)
+        }
+    }
+    sites.sort { lhs, rhs in
+        if lhs.seconds == rhs.seconds { return lhs.name < rhs.name }
+        return lhs.seconds > rhs.seconds
+    }
+    var groups = singles.map { CategoryGroup(title: nil, rows: [$0]) }
+    if !sites.isEmpty {
+        groups.append(CategoryGroup(title: "URLs", rows: sites))
+    }
+    groups.sort { lhs, rhs in
+        if lhs.seconds == rhs.seconds { return lhs.sortName < rhs.sortName }
+        return lhs.seconds > rhs.seconds
+    }
+    return groups
+}
+
+private extension CategoryGroup {
+    var sortName: String { title ?? rows.first?.name ?? "" }
 }

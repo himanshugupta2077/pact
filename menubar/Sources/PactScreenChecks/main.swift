@@ -49,9 +49,37 @@ enum PactScreenChecks {
             expect(prefs.assignments["youtube"] == "work", "assignment kept")
             expect(prefs.showTotal, "show total defaults on")
             expect(prefs.ssh == "pact@pact-host", "bad ssh is replaced")
-            expect(prefs.buckets.contains { $0.id == "entertainment" }, "default buckets restored")
+            expect(prefs.buckets.map(\.id) == ["entertainment", "gaming", "communication", "other"], "shipped buckets \(prefs.buckets.map(\.id))")
+            expect(!prefs.buckets.contains { $0.id == "work" }, "work is a class")
         } catch {
             expect(false, "preferences threw \(error)")
+        }
+        do {
+            let kept = #"{"buckets":[{"id":"gaming","name":"Gaming"}]}"#.data(using: .utf8)!
+            let prefs = try JSONDecoder().decode(Preferences.self, from: kept)
+            expect(prefs.buckets.map(\.id) == ["gaming"], "deleted buckets stay deleted \(prefs.buckets.map(\.id))")
+            expect(effectiveBucket("youtube", preferences: prefs).id == Bucket.unassigned.id, "missing entertainment is unassigned")
+            expect(effectiveBucket("app:ghostty", preferences: prefs).id == "work", "work class survives empty buckets")
+        } catch {
+            expect(false, "trimmed buckets threw \(error)")
+        }
+        do {
+            let legacy = #"{"buckets":[{"id":"work","name":"Work"},{"id":"entertainment","name":"Shows"},{"id":"gaming","name":"Gaming"},{"id":"communication","name":"Communication"}]}"#.data(using: .utf8)!
+            let prefs = try JSONDecoder().decode(Preferences.self, from: legacy)
+            expect(prefs.buckets.map(\.id) == ["entertainment", "gaming", "communication", "other"], "legacy buckets \(prefs.buckets.map(\.id))")
+            expect(prefs.buckets.first { $0.id == "entertainment" }?.name == "Shows", "stored entertainment name")
+            let again = try JSONDecoder().decode(Preferences.self, from: JSONEncoder().encode(prefs))
+            expect(again.buckets.map(\.id) == prefs.buckets.map(\.id), "migration sticks")
+        } catch {
+            expect(false, "legacy buckets threw \(error)")
+        }
+        do {
+            var prefs = Preferences.standard
+            prefs.buckets.removeAll { $0.id == "entertainment" || $0.id == "other" }
+            let again = try JSONDecoder().decode(Preferences.self, from: JSONEncoder().encode(prefs))
+            expect(again.buckets.map(\.id) == ["gaming", "communication"], "round trip keeps the deletion")
+        } catch {
+            expect(false, "bucket round trip threw \(error)")
         }
         expect(SSHTarget.isValid("pact@pact-host"), "ssh ok")
         expect(!SSHTarget.isValid("pact@pact-host;rm"), "ssh rejects a shell command")
@@ -145,12 +173,79 @@ enum PactScreenChecks {
         let worked = rollup(payload, preferences: moved)
         expect(worked.buckets.first { $0.id == "work" }?.seconds == 5400, "youtube moved to work")
         expect(worked.buckets.first { $0.id == "entertainment" } == nil, "entertainment empty")
+        expect(worked.classes.map(\.id) == ["work", "personal"], "two classes")
+        expect(worked.classes[0].seconds == 5400, "work class")
+        expect(worked.classes[1].seconds == 1800, "personal class")
+        expect(worked.classes[1].buckets.map(\.id) == ["communication"], "personal buckets \(worked.classes[1].buckets.map(\.id))")
+
+        expect(rolled.classes[0].seconds == 3600, "standard work class")
+        expect(rolled.classes[1].seconds == 3600, "standard personal class")
+        expect(rolled.classes[1].buckets.map(\.id) == ["entertainment", "communication"], "personal split")
+
+        var noFun = Preferences.standard
+        noFun.buckets.removeAll { $0.id == "entertainment" }
+        let shifted = rollup(payload, preferences: noFun)
+        expect(shifted.classes[1].buckets.first { $0.id == "other" }?.seconds == 1800, "youtube falls into other")
+        expect(shifted.classes[0].seconds == 3600, "ghostty stays work")
+
+        var none = Preferences.standard
+        none.buckets = []
+        let bare = rollup(payload, preferences: none)
+        expect(bare.classes.map(\.id) == ["work", "personal"], "classes stay when every bucket is gone")
+        expect(bare.classes[0].seconds == 3600, "bare work")
+        expect(bare.classes[1].buckets.map(\.id) == ["unassigned"], "bare personal \(bare.classes[1].buckets.map(\.id))")
+        expect(bare.classes[1].seconds == 3600, "bare personal seconds")
+
+        var custom = Preferences.standard
+        custom.buckets.append(Bucket(id: "reading", name: "Reading"))
+        custom.assignments["app:slack"] = "reading"
+        custom.assignments["hotstar"] = "work"
+        expect(effectiveBucket("app:slack", preferences: custom).id == "reading", "slack in a new bucket")
+        expect(effectiveBucket("hotstar", preferences: custom).id == "work", "hotstar moved to work")
+
+        let parts = classParts([
+            BucketTotal(id: "work", name: "Work", seconds: 10),
+            BucketTotal(id: "entertainment", name: "Entertainment", seconds: 5),
+            BucketTotal(id: "other", name: "Other", seconds: 5),
+        ])
+        expect(parts.map(\.id) == ["work", "personal"], "chart classes")
+        expect(parts[1].seconds == 10, "personal chart total")
+
+        let named = ["netflix", "chatgpt", "app:system-settings", "instagram", "github"]
+        for category in named {
+            let alone = categoryGroups([
+                CategoryRow(category: category, name: category, seconds: 10, bucketId: "work", marked: false),
+            ])
+            expect(alone.count == 1 && alone[0].title == nil, "\(category) stays its own row")
+        }
+        let grouped = categoryGroups([
+            CategoryRow(category: "netflix", name: "Netflix", seconds: 60, bucketId: "entertainment", marked: false),
+            CategoryRow(category: "site:dash.cloudflare.com", name: "dash.cloudflare.com", seconds: 30, bucketId: "work", marked: false),
+            CategoryRow(category: "site:app.us.strut.io", name: "app.us.strut.io", seconds: 3600, bucketId: "entertainment", marked: true),
+            CategoryRow(category: "github", name: "GitHub", seconds: 50, bucketId: "work", marked: false),
+            CategoryRow(category: "chatgpt", name: "ChatGPT", seconds: 40, bucketId: "work", marked: false),
+            CategoryRow(category: "app:system-settings", name: "System Settings", seconds: 20, bucketId: "other", marked: false),
+            CategoryRow(category: "instagram", name: "Instagram", seconds: 15, bucketId: "entertainment", marked: false),
+        ])
+        let urls = grouped.filter { $0.title == "URLs" }
+        expect(urls.count == 1, "one URLs group")
+        expect(urls.first?.rows.map(\.category) == ["site:app.us.strut.io", "site:dash.cloudflare.com"], "sites share a group \(urls.first?.rows.map(\.category) ?? [])")
+        expect(urls.first?.rows.first { $0.category == "site:dash.cloudflare.com" }?.bucketId == "work", "short site keeps work")
+        expect(urls.first?.rows.first { $0.category == "site:app.us.strut.io" }?.bucketId == "entertainment", "long site keeps its bucket")
+        expect(grouped.map { $0.title ?? $0.rows[0].name } == ["URLs", "Netflix", "GitHub", "ChatGPT", "System Settings", "Instagram"], "group order \(grouped.map { $0.title ?? $0.rows[0].name })")
 
         expect(bucketId(from: "Reading", existing: Bucket.defaults) == "reading", "reading id")
-        expect(bucketId(from: "Work", existing: Bucket.defaults) == "work-2", "work id collision")
+        expect(bucketId(from: "Work", existing: []) == "work-2", "work is reserved")
+        expect(bucketId(from: "Personal", existing: []) == "personal-2", "personal is reserved")
         expect(bucketId(from: "???", existing: []) == nil, "blank id")
-        let merged = Preferences.mergingDefaults([Bucket(id: "reading", name: "Reading")])
-        expect(merged.map(\.id) == ["work", "entertainment", "gaming", "communication", "reading"], "merge \(merged.map(\.id))")
+        let cleaned = Preferences.cleanedBuckets([
+            Bucket(id: "gaming", name: "Gaming"),
+            Bucket(id: "gaming", name: "Games"),
+            Bucket(id: "work", name: "Work"),
+            Bucket(id: "bad id", name: "Nope"),
+            Bucket(id: "reading", name: "  "),
+        ])
+        expect(cleaned.map(\.id) == ["gaming"], "cleaned \(cleaned.map(\.id))")
 
         if failed > 0 {
             fputs("\(failed) failed\n", stderr)

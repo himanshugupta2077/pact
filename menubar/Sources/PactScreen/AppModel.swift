@@ -152,7 +152,7 @@ final class AppModel {
     }
 
     func removeBucket(_ id: String) {
-        guard !Bucket.defaults.contains(where: { $0.id == id }) else { return }
+        guard Bucket.isValidId(id) else { return }
         update { prefs in
             prefs.buckets.removeAll { $0.id == id }
             prefs.menuBucketIds.removeAll { $0 == id }

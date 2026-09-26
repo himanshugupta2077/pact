@@ -64,10 +64,11 @@ public func menuBarTitle(for rollup: DayRollup, preferences: Preferences) -> Str
     if preferences.showTotal {
         parts.append(formatDuration(rollup.screenSeconds))
     }
-    let buckets = Preferences.mergingDefaults(preferences.buckets)
+    let buckets = Preferences.cleanedBuckets(preferences.buckets)
     for id in preferences.menuBucketIds {
         let seconds = rollup.buckets.first { $0.id == id }?.seconds ?? 0
-        let name = buckets.first { $0.id == id }?.name ?? (id == Bucket.other.id ? Bucket.other.name : id)
+        let name = buckets.first { $0.id == id }?.name
+            ?? (id == Bucket.work.id ? Bucket.work.name : id)
         parts.append("\(Bucket(id: id, name: name).menuShort) \(formatDuration(seconds))")
     }
     if preferences.showDevices {

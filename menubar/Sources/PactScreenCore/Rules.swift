@@ -9,11 +9,18 @@ public struct Bucket: Codable, Equatable, Sendable, Identifiable {
         self.name = name
     }
 
+    /// Fixed classes. They are not buckets: they cannot be renamed or removed.
+    public static let work = Bucket(id: "work", name: "Work")
+    public static let personal = Bucket(id: "personal", name: "Personal")
+    /// Shown when time is Personal and no kept bucket claims it.
+    public static let unassigned = Bucket(id: "unassigned", name: "Unassigned")
+    public static let reservedIds: Set<String> = [work.id, personal.id, unassigned.id]
+
     public static let defaults: [Bucket] = [
-        Bucket(id: "work", name: "Work"),
         Bucket(id: "entertainment", name: "Entertainment"),
         Bucket(id: "gaming", name: "Gaming"),
         Bucket(id: "communication", name: "Communication"),
+        other,
     ]
 
     public static let other = Bucket(id: "other", name: "Other")
@@ -31,7 +38,7 @@ public struct Bucket: Codable, Equatable, Sendable, Identifiable {
     }
 
     public static func isValidId(_ id: String) -> Bool {
-        guard id != other.id, let first = id.first, first.isLetter, id.count <= 32 else { return false }
+        guard !reservedIds.contains(id), let first = id.first, first.isLetter, id.count <= 32 else { return false }
         return id.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" }
     }
 
@@ -98,8 +105,12 @@ public struct Preferences: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         assignments = try container.decodeIfPresent([String: String].self, forKey: .assignments) ?? [:]
-        let stored = try container.decodeIfPresent([Bucket].self, forKey: .buckets) ?? []
-        buckets = Preferences.mergingDefaults(stored)
+        if container.contains(.buckets) {
+            let stored = try container.decode([Bucket].self, forKey: .buckets)
+            buckets = Preferences.migrateBuckets(stored)
+        } else {
+            buckets = Bucket.defaults
+        }
         showTotal = try container.decodeIfPresent(Bool.self, forKey: .showTotal) ?? true
         menuBucketIds = try container.decodeIfPresent([String].self, forKey: .menuBucketIds) ?? []
         showDevices = try container.decodeIfPresent(Bool.self, forKey: .showDevices) ?? false
@@ -125,24 +136,27 @@ public struct Preferences: Codable, Equatable, Sendable {
         try container.encode(ssh, forKey: .ssh)
     }
 
-    /// Defaults stay in front. Custom buckets keep the order they were saved in.
-    public static func mergingDefaults(_ stored: [Bucket]) -> [Bucket] {
-        var defaultNames: [String: String] = [:]
-        for bucket in stored where Bucket.defaults.contains(where: { $0.id == bucket.id }) {
-            let name = bucket.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !name.isEmpty { defaultNames[bucket.id] = name }
-        }
-        let defaults = Bucket.defaults.map { bucket in
-            Bucket(id: bucket.id, name: defaultNames[bucket.id] ?? bucket.name)
-        }
-        var extras: [Bucket] = []
-        var seen = Set(defaults.map(\.id))
+    /// Drops blank names, reserved class ids, and duplicates. Order stays as saved.
+    public static func cleanedBuckets(_ stored: [Bucket]) -> [Bucket] {
+        var result: [Bucket] = []
+        var seen = Set<String>()
         for bucket in stored {
             let name = bucket.name.trimmingCharacters(in: .whitespacesAndNewlines)
             guard Bucket.isValidId(bucket.id), !name.isEmpty, seen.insert(bucket.id).inserted else { continue }
-            extras.append(Bucket(id: bucket.id, name: name))
+            result.append(Bucket(id: bucket.id, name: name))
         }
-        return defaults + extras
+        return result
+    }
+
+    /// Older saves listed Work as a bucket and left Other implied.
+    /// A list that still contains Work is that older shape.
+    public static func migrateBuckets(_ stored: [Bucket]) -> [Bucket] {
+        let legacy = stored.contains { $0.id == Bucket.work.id }
+        var cleaned = cleanedBuckets(stored)
+        if legacy, !cleaned.contains(where: { $0.id == Bucket.other.id }) {
+            cleaned.append(Bucket.other)
+        }
+        return cleaned
     }
 }
 
@@ -171,9 +185,11 @@ public struct BucketEffect: Equatable, Sendable {
 
 public func bucketId(from name: String, existing: [Bucket]) -> String? {
     let base = Bucket.slug(name)
-    guard Bucket.isValidId(base) else { return nil }
-    let taken = Set(existing.map(\.id))
-    if !taken.contains(base) { return base }
+    guard !base.isEmpty else { return nil }
+    let taken = Set(existing.map(\.id)).union(Bucket.reservedIds)
+    if Bucket.isValidId(base), !taken.contains(base) { return base }
+    let reserved = Bucket.reservedIds.contains(base)
+    guard Bucket.isValidId(base) || reserved else { return nil }
     for number in 2...50 {
         let candidate = String("\(base)-\(number)".prefix(32))
         if Bucket.isValidId(candidate), !taken.contains(candidate) { return candidate }
@@ -182,23 +198,35 @@ public func bucketId(from name: String, existing: [Bucket]) -> String? {
 }
 
 public func effectiveBucket(_ category: String, preferences: Preferences) -> BucketEffect {
-    let buckets = Preferences.mergingDefaults(preferences.buckets)
-    let known = Set(buckets.map(\.id)).union([Bucket.other.id])
-    if let assigned = preferences.assignments[category], known.contains(assigned) {
-        return BucketEffect(id: assigned, marked: true)
+    let live = Set(Preferences.cleanedBuckets(preferences.buckets).map(\.id))
+    if let assigned = preferences.assignments[category] {
+        if assigned == Bucket.work.id {
+            return BucketEffect(id: Bucket.work.id, marked: true)
+        }
+        if live.contains(assigned) {
+            return BucketEffect(id: assigned, marked: true)
+        }
     }
-    if let builtin = defaultBucket(for: category), known.contains(builtin) {
-        return BucketEffect(id: builtin, marked: false)
+    if let builtin = defaultBucket(for: category) {
+        if builtin == Bucket.work.id {
+            return BucketEffect(id: Bucket.work.id, marked: false)
+        }
+        if live.contains(builtin) {
+            return BucketEffect(id: builtin, marked: false)
+        }
     }
-    return BucketEffect(id: Bucket.other.id, marked: false)
+    if live.contains(Bucket.other.id) {
+        return BucketEffect(id: Bucket.other.id, marked: false)
+    }
+    return BucketEffect(id: Bucket.unassigned.id, marked: false)
 }
 
 /// Built-in groups. A row the user has marked wins over these.
 ///
-/// Sites and desktop browsers start as work: YouTube, JioHotstar, Netflix, and
-/// the other named media categories are already split out, so what is left is
-/// the terminal, Teams, research, and other websites. Brave on the phone has
-/// no URLs, so `app:brave` stays unmarked instead of being called work.
+/// Sites and desktop browsers start as work. YouTube, JioHotstar, Netflix, and
+/// the other named media categories are already split out. Brave on the phone
+/// has no URLs, so `app:brave` stays unmarked instead of being called work.
+/// Only the Work assignment counts as Work. Every other bucket counts as Personal.
 public func defaultBucket(for category: String) -> String? {
     if let exact = exactCategories[category] { return exact }
     if category.hasPrefix("app:") {

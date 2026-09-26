@@ -45,8 +45,11 @@ enum Dump {
                 exit(1)
             }
             print(model.menuTitle)
-            for bucket in rolled.buckets {
-                print("\(bucket.name)\t\(formatDuration(bucket.seconds))\t\(Int(bucket.seconds.rounded()))")
+            for klass in rolled.classes {
+                print("\(klass.name)\t\(formatDuration(klass.seconds))\t\(Int(klass.seconds.rounded()))")
+                for bucket in klass.buckets {
+                    print("  \(bucket.name)\t\(formatDuration(bucket.seconds))\t\(Int(bucket.seconds.rounded()))")
+                }
             }
             for device in rolled.devices {
                 print("\(device.name)\t\(formatDuration(device.seconds))\t\(Int(device.seconds.rounded()))")
@@ -54,10 +57,7 @@ enum Dump {
             print("categories \(rolled.categories.count)")
             print("hours \(rolled.hours.filter { $0.seconds > 0 }.count)")
             if render, let png = renderPNG(model) {
-                let path = CommandLine.arguments.contains("--categories")
-                    ? "/tmp/pact-screen-categories.png"
-                    : "/tmp/pact-screen.png"
-                let url = URL(fileURLWithPath: path)
+                let url = URL(fileURLWithPath: "/tmp/pact-screen.png")
                 try png.write(to: url)
                 print("rendered \(url.path)")
             }
@@ -80,9 +80,6 @@ enum Dump {
             defer: false
         )
         window.appearance = NSAppearance(named: .darkAqua)
-        if CommandLine.arguments.contains("--categories") {
-            panel.selectPage(1)
-        }
         window.contentView = panel.view
         panel.view.frame = NSRect(x: 0, y: 0, width: 400, height: 640)
         panel.view.layoutSubtreeIfNeeded()
