@@ -1,6 +1,6 @@
 # Screen-time collectors — handoff
 
-Pact on the Android phone still counts only that phone and does not upload usage. These scripts are the other half: read ActivityWatch on each machine and replace that device's day on the toolkit VPS, so screen time adds up across devices.
+The Mac collector reads ActivityWatch and replaces that Mac's day on the toolkit VPS. The phone uploads its own day from Pact. Screen time adds up across devices.
 
 The VPS does not decide "too much" yet. It only stores the files.
 
@@ -9,11 +9,17 @@ The VPS does not decide "too much" yet. It only stores the files.
 | Device | How | ActivityWatch |
 |---|---|---|
 | This Mac (`MacBook Air`, hostname `mac.local`) | `collector/aw_ship.py` every 5 min | Local server `http://127.0.0.1:5600`, no API key. App v0.13.2. Device id `22222222-2222-4222-8222-222222222222`. |
-| Nothing Phone (2), USB to this Mac | `collector/aw_android.py` every 5 min **while plugged in** | App `net.activitywatch.android` 0.14.1, server `127.0.0.1:5600` **on the phone**. Forwarded to `127.0.0.1:5601` here so it does not collide with the Mac server. Device id `11111111-1111-4111-8111-111111111111`, bucket hostname `phone`. USB serial seen: `00000000`. |
+| Nothing Phone (2) | Pact on the phone, every 5 min over Tailscale, cable or not | Foreground time from Android usage events. Device id `11111111-1111-4111-8111-111111111111`, hostname `phone`. Posted to `pact.example:8765`, which is the Tailscale address only. |
 
-Day boundary is `Asia/Kolkata`. Each run **replaces** that device's file for the day. Unplugged phone time stays on the phone and is included the next time it is plugged in.
+Day boundary is `Asia/Kolkata`. Each run **replaces** that device's file for the day.
 
-ActivityWatch's HTTP server on the phone listens on `127.0.0.1:5600` only while its foreground service is running. Android can bring the accessibility and notification watchers back without that service, and then port 5600 is closed even though the phone is plugged in and usage is still stored. `aw_android.py` opens the ActivityWatch screen to start the service, reads the day, and returns to the app that was in front.
+The phone does not wait for a cable. Pact reads the same usage events it already uses for limits and POSTs today's file every 5 minutes to a small receiver on the toolkit host. That receiver listens on the Tailscale address, port 8765, and writes `/var/lib/pact/activity/<device-id>/<day>.json`. The bearer token is `~/.config/pact-aw/phone-upload-token` on this Mac and `files/ship/token` inside the Pact app. Neither file is committed. Tailscale on the phone has to be connected, the same way override requests already work.
+
+`collector/aw_android.py` is the USB fallback. It reads ActivityWatch on the phone, which only serves `127.0.0.1:5600` while its own foreground service is up. The 5-minute USB agent is not loaded; a plugged-in run would replace the phone's file. Use it when Tailscale is down:
+
+```bash
+python3 collector/aw_android.py
+```
 
 ## Where the files are
 
@@ -26,7 +32,7 @@ SSH: `ssh pact@pact-host` (Tailscale). Do not restart `pact.service`. `sudo` on 
 
 `summary` is rebuilt by the remote Python in `SUMMARY_SCRIPT` inside `aw_ship.py` after each upload. Category seconds are what a later limit should read. `screen_seconds` is the headline. `engaged_seconds` is the subset with keyboard or mouse activity (Mac only; on Android they are equal).
 
-Schema is `1`, `source` is `activitywatch`. Segments have `app`, `title`, `url`, `domain`, `category`. Do not commit `~/.config/pact-aw/android-token` (mode `0600`). That file is the phone server's Bearer key. If a request returns 401, open the ActivityWatch app on the phone once; logcat contains `token=<uuid>`, and `aw_android.py` saves it.
+Schema is `1`. Mac files use `source` `activitywatch`. Phone files uploaded by Pact use `source` `pact`. Segments have `app`, `title`, `url`, `domain`, `category`. Do not commit `~/.config/pact-aw/android-token` or `~/.config/pact-aw/phone-upload-token` (mode `0600`). The Android token is ActivityWatch's local key, used only by the USB fallback. The phone-upload token is what Pact sends to port 8765.
 
 ## Counting rules (`aw_usage.py`)
 
@@ -40,7 +46,7 @@ Schema is `1`, `source` is `activitywatch`. Segments have `app`, `title`, `url`,
 
 ```bash
 cd ~/pact
-python3 -m unittest collector.test_aw_usage collector.test_aw_android
+python3 -m unittest collector.test_aw_usage collector.test_aw_android collector.test_phone_activity_server
 python3 collector/aw_ship.py --dry-run
 python3 collector/aw_android.py --dry-run
 ```
@@ -52,7 +58,7 @@ python3 collector/aw_android.py --dry-run
 | `app.pact.aw-ship` | `~/Library/Logs/pact-aw-ship.log` |
 | `app.pact.aw-ship-android` | `~/Library/Logs/pact-aw-ship-android.log` |
 
-The phone agent exits quietly when nothing is plugged in. If the phone is plugged in and port 5600 is closed, that run opens ActivityWatch so the server starts.
+The USB phone agent is not loaded. Pact on the phone uploads by itself. `aw_android.py` still opens ActivityWatch if port 5600 is closed, for a manual run while the phone is plugged in.
 
 ## Menu bar
 
@@ -64,6 +70,6 @@ Bucket marks (work, entertainment, gaming, communication) stay on this Mac in `~
 
 - No "you have used YouTube too much" rule on the VPS. The menu bar reads the day files and groups them. It does not write a limit back.
 - MSI laptop and office laptop are not collectors.
-- The phone does not push by itself. Its server is localhost-only.
+- ActivityWatch on the phone still does not push. Pact does, over Tailscale, every 5 minutes.
 - Brave on the phone has no URLs. The Android web watcher only extracts Chrome, Firefox, Samsung Internet, Opera, and Edge (`WebWatcher.KNOWN_BROWSER_PACKAGES`). Brave time is `app:brave`.
-- Pact's own `UsageStats` path is unchanged and still local.
+- Pact still enforces limits from local usage. That same usage is what it uploads.

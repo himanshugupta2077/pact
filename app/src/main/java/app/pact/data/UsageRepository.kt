@@ -17,6 +17,13 @@ data class DayUsage(
     val totalMs: Long get() = byPackage.values.sum()
 }
 
+/** One foreground stretch already clipped to the day and with pop-ups removed. */
+data class UsageSpan(
+    val packageName: String,
+    val startMs: Long,
+    val endMs: Long,
+)
+
 class UsageRepository(private val context: Context) {
 
     @Volatile
@@ -30,6 +37,11 @@ class UsageRepository(private val context: Context) {
 
     fun foregroundMsToday(): Map<String, Long> = synchronized(lock) {
         dayUsageUnlocked(startOfDayMs()).byPackage
+    }
+
+    /** Foreground stretches from [dayStart] until [dayEnd], same clock as the limiter. */
+    fun foregroundSpans(dayStart: Long, dayEnd: Long): List<UsageSpan> = synchronized(lock) {
+        readClock(dayStart, dayEnd)?.spans?.toList() ?: emptyList()
     }
 
     fun unlocksToday(): Int = synchronized(lock) {
@@ -115,12 +127,12 @@ class UsageRepository(private val context: Context) {
         return adjust(cache[dayStart]?.usage ?: DayUsage(dayStart, emptyMap(), 0))
     }
 
-    private fun fillFromEvents(rangeStart: Long, rangeEnd: Long) {
-        if (rangeEnd <= rangeStart) return
-        if (!hasUsageAccess(context)) return
-        val usm = context.getSystemService(UsageStatsManager::class.java) ?: return
+    private fun readClock(rangeStart: Long, rangeEnd: Long): ForegroundClock? {
+        if (rangeEnd <= rangeStart) return null
+        if (!hasUsageAccess(context)) return null
+        val usm = context.getSystemService(UsageStatsManager::class.java) ?: return null
         val queryStart = (rangeStart - LOOKBACK_MS).coerceAtLeast(0L)
-        val events = runCatching { usm.queryEvents(queryStart, rangeEnd) }.getOrNull() ?: return
+        val events = runCatching { usm.queryEvents(queryStart, rangeEnd) }.getOrNull() ?: return null
         val event = UsageEvents.Event()
 
         val resumeType = if (Build.VERSION.SDK_INT >= 29) {
@@ -164,6 +176,11 @@ class UsageRepository(private val context: Context) {
             }
         }
         clock.finish(rangeEnd)
+        return clock
+    }
+
+    private fun fillFromEvents(rangeStart: Long, rangeEnd: Long) {
+        val clock = readClock(rangeStart, rangeEnd) ?: return
 
         val now = System.currentTimeMillis()
         val todayStart = startOfDayMs(now)
@@ -208,6 +225,7 @@ class UsageRepository(private val context: Context) {
         private val suspended = LinkedHashMap<String, Int>()
         val totals = HashMap<Long, HashMap<String, Long>>()
         val unlocks = HashMap<Long, Int>()
+        val spans = ArrayList<UsageSpan>()
 
         fun resume(packageName: String, t: Long) {
             drain(t)
@@ -360,6 +378,7 @@ class UsageRepository(private val context: Context) {
                 if (add > 0) {
                     val map = totals.getOrPut(day) { HashMap() }
                     map[pkg] = (map[pkg] ?: 0L) + add
+                    spans.add(UsageSpan(pkg, a, clip))
                 }
                 if (clip <= a) break
                 a = clip

@@ -11,9 +11,11 @@ import app.pact.data.RuleRepository
 import app.pact.data.UsageRepository
 import app.pact.engine.RuleEngine
 import app.pact.enforce.MediaSilencer
+import android.util.Log
 import app.pact.override.OverrideClient
 import app.pact.override.OverrideStore
 import app.pact.override.OverrideSync
+import app.pact.ship.PhoneShip
 import app.pact.util.hasUsageAccess
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -70,6 +72,13 @@ class PactApp : Application() {
         }
         scope.launch {
             runCatching { overrides.runLoop() }
+        }
+        scope.launch {
+            while (isActive) {
+                runCatching { PhoneShip(this@PactApp).uploadToday() }
+                    .onFailure { Log.w("PactShip", "upload failed: ${it.message}") }
+                delay(5 * 60 * 1000L)
+            }
         }
     }
 

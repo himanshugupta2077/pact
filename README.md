@@ -72,15 +72,11 @@ YouTube in a browser and the YouTube or JioHotstar apps use the same category na
 
 ## Nothing Phone
 
-ActivityWatch on the phone (`net.activitywatch.android`) records foreground apps on the phone itself. With the phone plugged in over USB:
+Pact on the phone uploads today's foreground time every 5 minutes over Tailscale. The cable is not required. Tailscale on the phone has to be connected, the same as for an override request.
 
-```bash
-python3 collector/aw_android.py --dry-run
-python3 collector/aw_android.py
-python3 collector/aw_android.py --install   # every 5 minutes while it is plugged in
-```
+The file is the second device under `/var/lib/pact/activity/`, and `summary/<day>.json` adds it to the Mac. WhatsApp, Netflix, Instagram, YouTube, and YouTube Music use the same category names as the Mac.
 
-The phone's day is a second file under `/var/lib/pact/activity/`, and `summary/<day>.json` adds it to the Mac. WhatsApp, Netflix, Instagram, YouTube, and YouTube Music use the same category names as the Mac. Brave on the phone counts as Brave: ActivityWatch's Android URL watcher follows Chrome and Firefox, not Brave.
+If Tailscale is down, plug the phone in and run `python3 collector/aw_android.py` once. That reads ActivityWatch over USB. The automatic USB job is not loaded, so it does not replace the phone's own upload.
 
 ## Menu bar
 
