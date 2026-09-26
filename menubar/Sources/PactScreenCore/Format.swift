@@ -23,6 +23,28 @@ public func formatDay(_ day: String) -> String {
     return formatter.string(from: date)
 }
 
+public func formatWeekRange(containing day: String) -> String {
+    let days = DayClock.weekDays(containing: day)
+    guard let first = days.first, let last = days.last,
+          let start = DayClock.date(from: first),
+          let end = DayClock.date(from: last)
+    else { return "" }
+    let calendar = DayClock.calendar
+    let startParts = calendar.dateComponents([.day, .month], from: start)
+    let endParts = calendar.dateComponents([.day, .month], from: end)
+    let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    func monthName(_ month: Int?) -> String {
+        guard let month, (1...12).contains(month) else { return "" }
+        return months[month - 1]
+    }
+    let startDay = startParts.day ?? 0
+    let endDay = endParts.day ?? 0
+    if startParts.month == endParts.month {
+        return "\(startDay)–\(endDay) \(monthName(startParts.month))"
+    }
+    return "\(startDay) \(monthName(startParts.month)) – \(endDay) \(monthName(endParts.month))"
+}
+
 public func percentText(_ part: Double, of whole: Double) -> String {
     guard whole > 0 else { return "0%" }
     return "\(Int((part / whole * 100).rounded()))%"

@@ -21,6 +21,7 @@ final class AppModel {
     var onMenuTitle: ((String) -> Void)?
     var preferences = Preferences.standard
     var dayRollup: DayRollup?
+    var weekRollup: DayRollup?
     var refreshing = false
     var errorText: String?
     var day = ""
@@ -28,7 +29,7 @@ final class AppModel {
     var loginNote: String?
     var followsToday = true
 
-    private var payload: DayPayload?
+    private var payloadsByDay: [String: DayPayload] = [:]
     private var started = false
     private var refreshGeneration = 0
 
@@ -48,7 +49,7 @@ final class AppModel {
         preferences = Self.loadPreferences()
         day = DayClock.today()
         followsToday = true
-        loadCache(for: day)
+        loadCachedWeek()
         recompute()
         pruneCache()
         applyLoginItem()
@@ -62,11 +63,18 @@ final class AppModel {
     }
 
     func adopt(preferences: Preferences, payload: DayPayload, fetchedAt: Date) {
+        adopt(preferences: preferences, payloads: [payload], day: payload.day, fetchedAt: fetchedAt)
+    }
+
+    func adopt(preferences: Preferences, payloads: [DayPayload], day: String, fetchedAt: Date) {
         self.preferences = preferences
-        self.payload = payload
+        self.day = day
         self.fetchedAt = fetchedAt
-        day = payload.day
         errorText = nil
+        store(payloads)
+        if payloadsByDay[day] == nil {
+            payloadsByDay[day] = DayPayload(day: day, devices: [])
+        }
         recompute()
     }
 
@@ -75,7 +83,7 @@ final class AppModel {
             let today = DayClock.today()
             if today != day {
                 day = today
-                loadCache(for: today)
+                loadCachedWeek()
                 recompute()
             }
         }
@@ -95,7 +103,7 @@ final class AppModel {
         day = next
         followsToday = next == DayClock.today()
         errorText = nil
-        loadCache(for: next)
+        loadCachedWeek()
         recompute()
         refresh()
     }
@@ -136,6 +144,8 @@ final class AppModel {
     }
 
     func setAssignment(category: String, bucketId: String) {
+        let allowed = Set(preferences.buckets.map(\.id)).union([Bucket.work.id, Bucket.personal.id])
+        guard allowed.contains(bucketId) else { return }
         update { $0.assignments[category] = bucketId }
     }
 
@@ -144,11 +154,21 @@ final class AppModel {
     }
 
     @discardableResult
-    func addBucket(name: String) -> Bool {
+    func addBucket(name: String, parent: String) -> Bool {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let id = bucketId(from: trimmed, existing: preferences.buckets) else { return false }
-        update { $0.buckets.append(Bucket(id: id, name: trimmed)) }
+        let parent = parent == Bucket.work.id ? Bucket.work.id : Bucket.personal.id
+        update { $0.buckets.append(Bucket(id: id, name: trimmed, parent: parent)) }
         return true
+    }
+
+    func setBucketParent(_ id: String, _ parent: String) {
+        guard Bucket.isValidId(id) else { return }
+        let parent = parent == Bucket.work.id ? Bucket.work.id : Bucket.personal.id
+        update { prefs in
+            guard let index = prefs.buckets.firstIndex(where: { $0.id == id }) else { return }
+            prefs.buckets[index].parent = parent
+        }
     }
 
     func removeBucket(_ id: String) {
@@ -169,11 +189,18 @@ final class AppModel {
         do {
             let next = try await Fetcher.fetch(day: requestedDay, ssh: ssh)
             guard generation == refreshGeneration, requestedDay == day else { return }
-            payload = next
             errorText = nil
             let when = Date()
             fetchedAt = when
-            saveCache(day: requestedDay, payload: next, fetchedAt: when)
+            store(next)
+            for payload in next {
+                saveCache(day: payload.day, payload: payload, fetchedAt: when)
+            }
+            if payloadsByDay[requestedDay] == nil {
+                let empty = DayPayload(day: requestedDay, devices: [])
+                payloadsByDay[requestedDay] = empty
+                saveCache(day: requestedDay, payload: empty, fetchedAt: when)
+            }
             recompute()
         } catch {
             guard generation == refreshGeneration, requestedDay == day else { return }
@@ -190,15 +217,27 @@ final class AppModel {
         recompute()
     }
 
-    private func recompute() {
-        guard let payload else {
-            dayRollup = nil
-            setTitle("…")
-            return
+    private func store(_ payloads: [DayPayload]) {
+        for payload in payloads where !payload.day.isEmpty {
+            payloadsByDay[payload.day] = payload
         }
-        let next = PactScreenCore.rollup(payload, preferences: preferences)
-        dayRollup = next
-        setTitle(menuBarTitle(for: next, preferences: preferences))
+    }
+
+    private func recompute() {
+        let prefs = preferences
+        if let payload = payloadsByDay[day] {
+            dayRollup = PactScreenCore.rollup(payload, preferences: prefs)
+        } else {
+            dayRollup = nil
+        }
+        let weekDays = DayClock.weekDays(containing: day.isEmpty ? DayClock.today() : day)
+        let present = weekDays.compactMap { payloadsByDay[$0] }
+        weekRollup = present.isEmpty ? nil : rollupWeek(present, day: day, preferences: prefs)
+        if let dayRollup {
+            setTitle(menuBarTitle(for: dayRollup, preferences: prefs))
+        } else {
+            setTitle("…")
+        }
     }
 
     private func setTitle(_ title: String) {
@@ -207,24 +246,27 @@ final class AppModel {
         onMenuTitle?(title)
     }
 
-    private func loadCache(for day: String) {
-        let url = Store.cache.appendingPathComponent("\(day).json")
-        guard let data = try? Data(contentsOf: url) else {
-            payload = nil
-            fetchedAt = nil
-            return
+    private func loadCachedWeek() {
+        let anchor = day
+        let hadAnchor = payloadsByDay[anchor] != nil
+        for item in DayClock.weekDays(containing: anchor) where payloadsByDay[item] == nil {
+            guard let envelope = readCache(item), envelope.payload.day == item else { continue }
+            payloadsByDay[item] = envelope.payload
+            if item == anchor {
+                fetchedAt = envelope.fetchedAt
+            }
         }
+        if !hadAnchor, payloadsByDay[anchor] == nil {
+            fetchedAt = nil
+        }
+    }
+
+    private func readCache(_ day: String) -> CacheEnvelope? {
+        let url = Store.cache.appendingPathComponent("\(day).json")
+        guard let data = try? Data(contentsOf: url) else { return nil }
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
-        guard let envelope = try? decoder.decode(CacheEnvelope.self, from: data),
-              envelope.payload.day == day
-        else {
-            payload = nil
-            fetchedAt = nil
-            return
-        }
-        payload = envelope.payload
-        fetchedAt = envelope.fetchedAt
+        return try? decoder.decode(CacheEnvelope.self, from: data)
     }
 
     private func saveCache(day: String, payload: DayPayload, fetchedAt: Date) {

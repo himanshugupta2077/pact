@@ -4,6 +4,9 @@
 The menu bar app runs this on the toolkit VPS over SSH. It only reads
 /var/lib/pact/activity. It does not create or change files, and the
 JSON has no window titles or URLs.
+
+PACT_ACTIVITY_DAY selects one Asia/Kolkata day. PACT_ACTIVITY_WEEK=1 prints
+every day in the Monday–Sunday week that contains that day.
 """
 
 from __future__ import annotations
@@ -135,6 +138,13 @@ def device_payload(data: dict) -> dict:
     }
 
 
+def week_days(day: str) -> list[str]:
+    """Monday through Sunday around one YYYY-MM-DD day. Matches the menu bar clock."""
+    parsed = datetime.strptime(day, "%Y-%m-%d").date()
+    monday = parsed - timedelta(days=parsed.weekday())
+    return [(monday + timedelta(days=offset)).isoformat() for offset in range(7)]
+
+
 def collect(root: Path, day: str) -> dict:
     devices = []
     if root.is_dir():
@@ -157,7 +167,11 @@ def main() -> int:
         sys.stderr.write("bad day\n")
         return 1
     root = Path(os.environ.get("PACT_ACTIVITY_ROOT", DEFAULT_ROOT))
-    json.dump(collect(root, day), sys.stdout, ensure_ascii=False)
+    if os.environ.get("PACT_ACTIVITY_WEEK") == "1":
+        payload = {"days": [collect(root, item) for item in week_days(day)]}
+    else:
+        payload = collect(root, day)
+    json.dump(payload, sys.stdout, ensure_ascii=False)
     sys.stdout.write("\n")
     return 0
 

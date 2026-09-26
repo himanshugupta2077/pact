@@ -19,14 +19,16 @@ public struct BucketTotal: Equatable, Sendable, Identifiable {
 public struct DeviceTotal: Equatable, Sendable, Identifiable {
     public var deviceId: String
     public var name: String
+    public var platform: String
     public var seconds: Double
     public var buckets: [BucketTotal]
 
     public var id: String { deviceId.isEmpty ? name : deviceId }
 
-    public init(deviceId: String, name: String, seconds: Double, buckets: [BucketTotal]) {
+    public init(deviceId: String, name: String, platform: String = "", seconds: Double, buckets: [BucketTotal]) {
         self.deviceId = deviceId
         self.name = name
+        self.platform = platform
         self.seconds = seconds
         self.buckets = buckets
     }
@@ -102,6 +104,20 @@ public struct ClassTotal: Equatable, Sendable, Identifiable {
     }
 }
 
+public struct UsageSlice: Equatable, Sendable, Identifiable {
+    public var id: String
+    public var name: String
+    public var seconds: Double
+    public var weekSeconds: Double
+
+    public init(id: String, name: String, seconds: Double, weekSeconds: Double) {
+        self.id = id
+        self.name = name
+        self.seconds = seconds
+        self.weekSeconds = weekSeconds
+    }
+}
+
 public struct DayRollup: Equatable, Sendable {
     public var day: String
     public var screenSeconds: Double
@@ -163,6 +179,7 @@ public func rollup(_ payload: DayPayload, preferences: Preferences) -> DayRollup
             DeviceTotal(
                 deviceId: device.deviceId,
                 name: name,
+                platform: device.platform,
                 seconds: device.screenSeconds,
                 buckets: bucketTotals(perBucket, buckets: totalsBuckets)
             )
@@ -173,11 +190,20 @@ public func rollup(_ payload: DayPayload, preferences: Preferences) -> DayRollup
         return lhs.seconds > rhs.seconds
     }
 
+    let byId = Dictionary(uniqueKeysWithValues: buckets.map { ($0.id, $0) })
     var bucketSeconds: [String: Double] = [:]
+    var directWork = 0.0
+    var loosePersonal = 0.0
     var categories: [CategoryRow] = []
     for (category, seconds) in categorySeconds where seconds > 0 {
         let effect = effectiveBucket(category, preferences: prefs)
-        bucketSeconds[effect.id, default: 0] += seconds
+        if byId[effect.id] != nil {
+            bucketSeconds[effect.id, default: 0] += seconds
+        } else if effect.id == Bucket.work.id {
+            directWork += seconds
+        } else {
+            loosePersonal += seconds
+        }
         categories.append(
             CategoryRow(
                 category: category,
@@ -206,12 +232,32 @@ public func rollup(_ payload: DayPayload, preferences: Preferences) -> DayRollup
         return lhs.seconds > rhs.seconds
     }
 
-    let flat = bucketTotals(bucketSeconds, buckets: totalsBuckets)
-    let personalBuckets = flat.filter { $0.id != Bucket.work.id }
-    let personalSeconds = personalBuckets.reduce(0) { $0 + $1.seconds }
+    func childTotals(parent: String) -> [BucketTotal] {
+        buckets.compactMap { bucket in
+            guard bucket.parent == parent, let seconds = bucketSeconds[bucket.id], seconds > 0 else { return nil }
+            return BucketTotal(id: bucket.id, name: bucket.name, seconds: seconds)
+        }
+    }
+    var workChildren = childTotals(parent: Bucket.work.id)
+    var personalChildren = childTotals(parent: Bucket.personal.id)
+    if loosePersonal > 0 {
+        personalChildren.append(BucketTotal(id: Bucket.unassigned.id, name: Bucket.unassigned.name, seconds: loosePersonal))
+    }
+    workChildren.sort(by: moreTime)
+    personalChildren.sort(by: moreTime)
+    let workSeconds = directWork + workChildren.reduce(0) { $0 + $1.seconds }
+    let personalSeconds = personalChildren.reduce(0) { $0 + $1.seconds }
+    var flat: [BucketTotal] = []
+    if workSeconds > 0 {
+        flat.append(BucketTotal(id: Bucket.work.id, name: Bucket.work.name, seconds: workSeconds))
+    }
+    flat.append(contentsOf: (workChildren + personalChildren.filter { $0.id != Bucket.unassigned.id }).sorted(by: moreTime))
+    if loosePersonal > 0 {
+        flat.append(BucketTotal(id: Bucket.unassigned.id, name: Bucket.unassigned.name, seconds: loosePersonal))
+    }
     let classes = [
-        ClassTotal(id: Bucket.work.id, name: Bucket.work.name, seconds: bucketSeconds[Bucket.work.id] ?? 0, buckets: []),
-        ClassTotal(id: Bucket.personal.id, name: Bucket.personal.name, seconds: personalSeconds, buckets: personalBuckets),
+        ClassTotal(id: Bucket.work.id, name: Bucket.work.name, seconds: workSeconds, buckets: workChildren),
+        ClassTotal(id: Bucket.personal.id, name: Bucket.personal.name, seconds: personalSeconds, buckets: personalChildren),
     ]
 
     return DayRollup(
@@ -226,6 +272,11 @@ public func rollup(_ payload: DayPayload, preferences: Preferences) -> DayRollup
     )
 }
 
+private func moreTime(_ lhs: BucketTotal, _ rhs: BucketTotal) -> Bool {
+    if lhs.seconds == rhs.seconds { return lhs.name < rhs.name }
+    return lhs.seconds > rhs.seconds
+}
+
 func bucketTotals(_ seconds: [String: Double], buckets: [Bucket]) -> [BucketTotal] {
     var rows: [BucketTotal] = []
     var seen = Set<String>()
@@ -237,16 +288,18 @@ func bucketTotals(_ seconds: [String: Double], buckets: [Bucket]) -> [BucketTota
         }
     }
     for (id, value) in seconds.sorted(by: { $0.key < $1.key }) where value > 0 && !seen.contains(id) {
-        let name = id == Bucket.unassigned.id ? Bucket.unassigned.name : id
+        let name = id == Bucket.unassigned.id || id == Bucket.personal.id ? Bucket.unassigned.name : id
         rows.append(BucketTotal(id: id, name: name, seconds: value))
     }
     return rows
 }
 
 /// Folds bucket rows into the two fixed classes for charts.
-public func classParts(_ buckets: [BucketTotal]) -> [BucketTotal] {
-    let work = buckets.filter { $0.id == Bucket.work.id }.reduce(0) { $0 + $1.seconds }
-    let personal = buckets.filter { $0.id != Bucket.work.id }.reduce(0) { $0 + $1.seconds }
+/// `workBucketIds` are buckets the user put under Work. The Work class itself counts too.
+public func classParts(_ buckets: [BucketTotal], workBucketIds: Set<String> = []) -> [BucketTotal] {
+    let workIds = workBucketIds.union([Bucket.work.id])
+    let work = buckets.filter { workIds.contains($0.id) }.reduce(0) { $0 + $1.seconds }
+    let personal = buckets.filter { !workIds.contains($0.id) }.reduce(0) { $0 + $1.seconds }
     var parts: [BucketTotal] = []
     if work > 0 {
         parts.append(BucketTotal(id: Bucket.work.id, name: Bucket.work.name, seconds: work))
@@ -286,4 +339,82 @@ public func categoryGroups(_ rows: [CategoryRow]) -> [CategoryGroup] {
 
 private extension CategoryGroup {
     var sortName: String { title ?? rows.first?.name ?? "" }
+}
+
+extension DayRollup {
+    public static func empty(day: String) -> DayRollup {
+        DayRollup(
+            day: day,
+            screenSeconds: 0,
+            buckets: [],
+            classes: [
+                ClassTotal(id: Bucket.work.id, name: Bucket.work.name, seconds: 0, buckets: []),
+                ClassTotal(id: Bucket.personal.id, name: Bucket.personal.name, seconds: 0, buckets: []),
+            ],
+            devices: [],
+            apps: [],
+            hours: [],
+            categories: []
+        )
+    }
+}
+
+public func rollupWeek(_ payloads: [DayPayload], day: String, preferences: Preferences) -> DayRollup {
+    let allowed = Set(DayClock.weekDays(containing: day))
+    let devices = payloads.filter { allowed.contains($0.day) }.flatMap(\.devices)
+    return rollup(DayPayload(day: day, devices: devices), preferences: preferences)
+}
+
+/// Leaf pieces of the day, largest day total first. Work is not forced to the top.
+/// A bucket the user put under Work is its own piece. Time assigned straight to Work,
+/// with no work bucket, is one Work piece. Personal is the class total, not a piece.
+public func usageSlices(day: DayRollup, week: DayRollup?) -> [UsageSlice] {
+    struct Accum {
+        var name: String
+        var day: Double
+        var week: Double
+    }
+    var map: [String: Accum] = [:]
+    func add(id: String, name: String, seconds: Double, weekSide: Bool) {
+        guard seconds > 0 else { return }
+        var row = map[id] ?? Accum(name: name, day: 0, week: 0)
+        row.name = name
+        if weekSide {
+            row.week += seconds
+        } else {
+            row.day += seconds
+        }
+        map[id] = row
+    }
+    func absorb(_ rollup: DayRollup, weekSide: Bool) {
+        for klass in rollup.classes {
+            let nested = klass.buckets.reduce(0) { $0 + $1.seconds }
+            let direct = klass.seconds - nested
+            if direct > 0.5 {
+                if klass.id == Bucket.work.id {
+                    add(id: Bucket.work.id, name: Bucket.work.name, seconds: direct, weekSide: weekSide)
+                } else {
+                    add(id: Bucket.unassigned.id, name: Bucket.unassigned.name, seconds: direct, weekSide: weekSide)
+                }
+            }
+            for bucket in klass.buckets {
+                add(id: bucket.id, name: bucket.name, seconds: bucket.seconds, weekSide: weekSide)
+            }
+        }
+    }
+    absorb(day, weekSide: false)
+    if let week {
+        absorb(week, weekSide: true)
+    }
+    return map.map { id, row in
+        UsageSlice(id: id, name: row.name, seconds: row.day, weekSeconds: row.week)
+    }
+    .filter { $0.seconds > 0.5 || $0.weekSeconds > 0.5 }
+    .sorted { lhs, rhs in
+        if lhs.seconds == rhs.seconds {
+            if lhs.weekSeconds == rhs.weekSeconds { return lhs.name < rhs.name }
+            return lhs.weekSeconds > rhs.weekSeconds
+        }
+        return lhs.seconds > rhs.seconds
+    }
 }

@@ -17,7 +17,7 @@ final class StatusController: NSObject, NSPopoverDelegate {
         popover.contentViewController = panel
         popover.behavior = .applicationDefined
         popover.delegate = self
-        popover.contentSize = NSSize(width: 400, height: 640)
+        popover.contentSize = PanelController.preferredSize
         if let button = statusItem.button {
             let image = NSImage(systemSymbolName: "hourglass", accessibilityDescription: "Screen time")
             image?.isTemplate = true

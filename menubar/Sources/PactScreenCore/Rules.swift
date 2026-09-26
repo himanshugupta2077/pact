@@ -3,10 +3,32 @@ import Foundation
 public struct Bucket: Codable, Equatable, Sendable, Identifiable {
     public var id: String
     public var name: String
+    /// `work` or `personal`. Older saves omit this and stay under Personal.
+    public var parent: String
 
-    public init(id: String, name: String) {
+    public init(id: String, name: String, parent: String = "personal") {
         self.id = id
         self.name = name
+        self.parent = parent == "work" ? "work" : "personal"
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, parent
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let id = try container.decode(String.self, forKey: .id)
+        let name = try container.decode(String.self, forKey: .name)
+        let parent = try container.decodeIfPresent(String.self, forKey: .parent) ?? Bucket.personal.id
+        self.init(id: id, name: name, parent: parent)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(parent, forKey: .parent)
     }
 
     /// Fixed classes. They are not buckets: they cannot be renamed or removed.
@@ -143,7 +165,7 @@ public struct Preferences: Codable, Equatable, Sendable {
         for bucket in stored {
             let name = bucket.name.trimmingCharacters(in: .whitespacesAndNewlines)
             guard Bucket.isValidId(bucket.id), !name.isEmpty, seen.insert(bucket.id).inserted else { continue }
-            result.append(Bucket(id: bucket.id, name: name))
+            result.append(Bucket(id: bucket.id, name: name, parent: bucket.parent))
         }
         return result
     }
@@ -203,6 +225,9 @@ public func effectiveBucket(_ category: String, preferences: Preferences) -> Buc
         if assigned == Bucket.work.id {
             return BucketEffect(id: Bucket.work.id, marked: true)
         }
+        if assigned == Bucket.personal.id {
+            return BucketEffect(id: Bucket.personal.id, marked: true)
+        }
         if live.contains(assigned) {
             return BucketEffect(id: assigned, marked: true)
         }
@@ -226,7 +251,7 @@ public func effectiveBucket(_ category: String, preferences: Preferences) -> Buc
 /// Sites and desktop browsers start as work. YouTube, JioHotstar, Netflix, and
 /// the other named media categories are already split out. Brave on the phone
 /// has no URLs, so `app:brave` stays unmarked instead of being called work.
-/// Only the Work assignment counts as Work. Every other bucket counts as Personal.
+/// A bucket placed under Work counts as Work. Personal, and every other bucket, counts as Personal.
 public func defaultBucket(for category: String) -> String? {
     if let exact = exactCategories[category] { return exact }
     if category.hasPrefix("app:") {

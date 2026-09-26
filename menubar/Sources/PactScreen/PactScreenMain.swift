@@ -37,9 +37,9 @@ enum Dump {
         let day = DayClock.today()
         do {
             let script = try Fetcher.loadScript()
-            let payload = try Fetcher.run(day: day, ssh: prefs.ssh, script: script)
+            let payloads = try Fetcher.run(day: day, ssh: prefs.ssh, script: script)
             let model = AppModel()
-            model.adopt(preferences: prefs, payload: payload, fetchedAt: Date())
+            model.adopt(preferences: prefs, payloads: payloads, day: day, fetchedAt: Date())
             guard let rolled = model.dayRollup else {
                 fputs("no rollup\n", stderr)
                 exit(1)
@@ -51,13 +51,24 @@ enum Dump {
                     print("  \(bucket.name)\t\(formatDuration(bucket.seconds))\t\(Int(bucket.seconds.rounded()))")
                 }
             }
+            if let week = model.weekRollup {
+                print("week \(formatWeekRange(containing: day))")
+                for klass in week.classes {
+                    print("  \(klass.name)\t\(formatDuration(klass.seconds))\t\(Int(klass.seconds.rounded()))")
+                }
+            }
             for device in rolled.devices {
                 print("\(device.name)\t\(formatDuration(device.seconds))\t\(Int(device.seconds.rounded()))")
             }
             print("categories \(rolled.categories.count)")
             print("hours \(rolled.hours.filter { $0.seconds > 0 }.count)")
-            if render, let png = renderPNG(model) {
+            if render, let png = renderPNG(model, settings: false) {
                 let url = URL(fileURLWithPath: "/tmp/pact-screen.png")
+                try png.write(to: url)
+                print("rendered \(url.path)")
+            }
+            if CommandLine.arguments.contains("--settings"), let png = renderPNG(model, settings: true) {
+                let url = URL(fileURLWithPath: "/tmp/pact-screen-settings.png")
                 try png.write(to: url)
                 print("rendered \(url.path)")
             }
@@ -70,18 +81,20 @@ enum Dump {
     }
 
     @MainActor
-    private static func renderPNG(_ model: AppModel) -> Data? {
+    private static func renderPNG(_ model: AppModel, settings: Bool) -> Data? {
         let panel = PanelController(model: model)
         panel.loadView()
+        if settings { panel.revealSettings() }
+        let size = NSSize(width: PanelController.preferredSize.width, height: settings ? 1280 : 980)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 400, height: 640),
+            contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )
         window.appearance = NSAppearance(named: .darkAqua)
         window.contentView = panel.view
-        panel.view.frame = NSRect(x: 0, y: 0, width: 400, height: 640)
+        panel.view.frame = NSRect(origin: .zero, size: size)
         panel.view.layoutSubtreeIfNeeded()
         window.layoutIfNeeded()
         window.displayIfNeeded()

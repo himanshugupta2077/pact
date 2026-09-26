@@ -135,6 +135,49 @@ class FetchDayTest(unittest.TestCase):
             payload = json.loads(good.stdout)
             self.assertEqual(payload, {"day": "2026-09-25", "devices": []})
 
+    def test_week_is_monday_through_sunday(self):
+        self.assertEqual(
+            fetch_day.week_days("2026-09-25"),
+            [
+                "2026-09-21",
+                "2026-09-22",
+                "2026-09-23",
+                "2026-09-24",
+                "2026-09-25",
+                "2026-09-26",
+                "2026-09-27",
+            ],
+        )
+        self.assertEqual(fetch_day.week_days("2026-09-21")[0], "2026-09-21")
+        self.assertEqual(fetch_day.week_days("2026-09-27")[-1], "2026-09-27")
+
+    def test_cli_week_reads_each_day_and_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            mac = root / "mac-id"
+            mac.mkdir()
+            secret = "SECRET_TITLE_SHOULD_NOT_LEAK"
+            (mac / "2026-09-21.json").write_text(
+                json.dumps(device("Monday", 100, [{"start": "2026-09-21T10:00:00+05:30", "end": "2026-09-21T10:01:00+05:30", "title": secret, "category": "youtube"}])),
+                encoding="utf-8",
+            )
+            (mac / "2026-09-25.json").write_text(json.dumps(device("Friday", 50, [])), encoding="utf-8")
+            before = sorted(path.name for path in root.rglob("*"))
+            env = dict(os.environ)
+            env["PACT_ACTIVITY_DAY"] = "2026-09-25"
+            env["PACT_ACTIVITY_ROOT"] = tmp
+            env["PACT_ACTIVITY_WEEK"] = "1"
+            good = subprocess.run([sys.executable, str(SCRIPT)], env=env, capture_output=True, text=True)
+            self.assertEqual(good.returncode, 0, good.stderr)
+            self.assertEqual(sorted(path.name for path in root.rglob("*")), before)
+            payload = json.loads(good.stdout)
+            self.assertEqual([item["day"] for item in payload["days"]], fetch_day.week_days("2026-09-25"))
+            by_day = {item["day"]: item["devices"] for item in payload["days"]}
+            self.assertEqual(len(by_day["2026-09-21"]), 1)
+            self.assertEqual(len(by_day["2026-09-25"]), 1)
+            self.assertEqual(by_day["2026-09-22"], [])
+            self.assertNotIn(secret, good.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

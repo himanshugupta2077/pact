@@ -53,4 +53,18 @@ public enum DayClock {
         if days > 0, value > cap { return cap }
         return value
     }
+
+    /// Monday through Sunday, in Asia/Kolkata, for the week that contains `day`.
+    public static func weekDays(containing day: String) -> [String] {
+        guard let date = date(from: day) else { return day.isEmpty ? [] : [day] }
+        let weekday = calendar.component(.weekday, from: date)
+        let fromMonday = (weekday + 5) % 7
+        guard let monday = calendar.date(byAdding: .day, value: -fromMonday, to: date) else {
+            return [day]
+        }
+        let days = (0..<7).compactMap { offset in
+            calendar.date(byAdding: .day, value: offset, to: monday).map { string(from: $0) }
+        }
+        return days.isEmpty ? [day] : days
+    }
 }

@@ -14,7 +14,7 @@ enum Fetcher {
         return try String(contentsOf: url, encoding: .utf8)
     }
 
-    static func fetch(day: String, ssh: String) async throws -> DayPayload {
+    static func fetch(day: String, ssh: String) async throws -> [DayPayload] {
         let script = try loadScript()
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
@@ -27,8 +27,8 @@ enum Fetcher {
         }
     }
 
-    /// Read one day from the VPS. The remote command only runs fetch_day.py, which does not write.
-    static func run(day: String, ssh: String, script: String) throws -> DayPayload {
+    /// Read the Monday–Sunday week that contains `day`. The remote command only runs fetch_day.py.
+    static func run(day: String, ssh: String, script: String) throws -> [DayPayload] {
         guard DayClock.date(from: day) != nil else {
             throw FetchFailure(message: "That day is not one Pact stores.")
         }
@@ -41,7 +41,7 @@ enum Fetcher {
             "-o", "BatchMode=yes",
             "-o", "ConnectTimeout=10",
             ssh,
-            "PACT_ACTIVITY_DAY=\(day) PACT_ACTIVITY_ROOT=/var/lib/pact/activity python3 -",
+            "PACT_ACTIVITY_WEEK=1 PACT_ACTIVITY_DAY=\(day) PACT_ACTIVITY_ROOT=/var/lib/pact/activity python3 -",
         ]
         let stdout = Pipe()
         let stderr = Pipe()
@@ -93,11 +93,24 @@ enum Fetcher {
             throw FetchFailure(message: "The VPS sent something that wasn't screen time.")
         }
         do {
-            return try DayPayload.decode(outData)
+            return try decodeDays(outData)
         } catch {
             throw FetchFailure(message: "The VPS sent something that wasn't screen time.")
         }
     }
+}
+
+private struct DayBatch: Decodable {
+    var days: [DayPayload]
+}
+
+private func decodeDays(_ data: Data) throws -> [DayPayload] {
+    let decoder = JSONDecoder()
+    decoder.keyDecodingStrategy = .convertFromSnakeCase
+    if let batch = try? decoder.decode(DayBatch.self, from: data) {
+        return batch.days
+    }
+    return [try DayPayload.decode(data)]
 }
 
 private final class PipeCapture: @unchecked Sendable {

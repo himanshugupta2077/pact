@@ -20,6 +20,17 @@ enum PactScreenChecks {
         expect(DayClock.shift("2026-09-25", by: -1, today: "2026-09-25") == "2026-09-24", "previous day")
         expect(DayClock.shift("2026-09-30", by: 1, today: "2026-10-02") == "2026-10-01", "next month")
         expect(DayClock.shift("2026-09-25", by: 1, today: "2026-09-25") == "2026-09-25", "do not pass today")
+        expect(
+            DayClock.weekDays(containing: "2026-09-25") == [
+                "2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24", "2026-09-25", "2026-09-26", "2026-09-27",
+            ],
+            "friday week \(DayClock.weekDays(containing: "2026-09-25"))"
+        )
+        expect(DayClock.weekDays(containing: "2026-09-21").first == "2026-09-21", "monday starts the week")
+        expect(DayClock.weekDays(containing: "2026-09-27").first == "2026-09-21", "sunday stays in the week")
+        expect(DayClock.weekDays(containing: "2026-09-20").last == "2026-09-20", "previous sunday")
+        expect(formatWeekRange(containing: "2026-09-25") == "21–27 Sep", "week title \(formatWeekRange(containing: "2026-09-25"))")
+        expect(formatWeekRange(containing: "2026-09-28") == "28 Sep – 4 Oct", "cross month \(formatWeekRange(containing: "2026-09-28"))")
 
         expect(formatDuration(0) == "0m", "zero")
         expect(formatDuration(30) == "30s", "seconds")
@@ -58,6 +69,7 @@ enum PactScreenChecks {
             let kept = #"{"buckets":[{"id":"gaming","name":"Gaming"}]}"#.data(using: .utf8)!
             let prefs = try JSONDecoder().decode(Preferences.self, from: kept)
             expect(prefs.buckets.map(\.id) == ["gaming"], "deleted buckets stay deleted \(prefs.buckets.map(\.id))")
+            expect(prefs.buckets.first?.parent == Bucket.personal.id, "missing parent stays personal")
             expect(effectiveBucket("youtube", preferences: prefs).id == Bucket.unassigned.id, "missing entertainment is unassigned")
             expect(effectiveBucket("app:ghostty", preferences: prefs).id == "work", "work class survives empty buckets")
         } catch {
@@ -78,6 +90,11 @@ enum PactScreenChecks {
             prefs.buckets.removeAll { $0.id == "entertainment" || $0.id == "other" }
             let again = try JSONDecoder().decode(Preferences.self, from: JSONEncoder().encode(prefs))
             expect(again.buckets.map(\.id) == ["gaming", "communication"], "round trip keeps the deletion")
+            var parented = Preferences.standard
+            parented.buckets[0].parent = Bucket.work.id
+            let keptParent = try JSONDecoder().decode(Preferences.self, from: JSONEncoder().encode(parented))
+            expect(keptParent.buckets[0].id == "entertainment", "entertainment stays first")
+            expect(keptParent.buckets[0].parent == Bucket.work.id, "work parent sticks")
         } catch {
             expect(false, "bucket round trip threw \(error)")
         }
@@ -101,6 +118,7 @@ enum PactScreenChecks {
         expect(effectiveBucket("app:brave", preferences: prefs).id == "other", "brave stays unmarked")
         expect(effectiveBucket("app:finder", preferences: prefs).id == "other", "finder")
         expect(!effectiveBucket("app:finder", preferences: prefs).marked, "finder is not marked")
+        expect(Bucket.defaults.allSatisfy { $0.parent == Bucket.personal.id }, "shipped buckets start under personal")
 
         var marked = prefs
         marked.assignments["youtube"] = "work"
@@ -115,6 +133,11 @@ enum PactScreenChecks {
         expect(!fallback.marked, "fallback is not a mark")
         marked.assignments["youtube"] = "other"
         expect(effectiveBucket("youtube", preferences: marked).id == "other", "explicit other")
+        var personalMark = Preferences.standard
+        personalMark.assignments["app:ghostty"] = Bucket.personal.id
+        let ghosttyPersonal = effectiveBucket("app:ghostty", preferences: personalMark)
+        expect(ghosttyPersonal.id == Bucket.personal.id, "ghostty assigned to personal")
+        expect(ghosttyPersonal.marked, "personal assignment is a mark")
 
         let payload = DayPayload(day: "2026-09-25", devices: [
             DeviceDay(
@@ -180,7 +203,9 @@ enum PactScreenChecks {
 
         expect(rolled.classes[0].seconds == 3600, "standard work class")
         expect(rolled.classes[1].seconds == 3600, "standard personal class")
-        expect(rolled.classes[1].buckets.map(\.id) == ["entertainment", "communication"], "personal split")
+        expect(rolled.classes[1].buckets.map(\.id) == ["communication", "entertainment"], "personal split \(rolled.classes[1].buckets.map(\.id))")
+        let slices = usageSlices(day: rolled, week: nil)
+        expect(slices.map(\.id) == ["work", "communication", "entertainment"], "slice order \(slices.map(\.id))")
 
         var noFun = Preferences.standard
         noFun.buckets.removeAll { $0.id == "entertainment" }
@@ -195,6 +220,58 @@ enum PactScreenChecks {
         expect(bare.classes[0].seconds == 3600, "bare work")
         expect(bare.classes[1].buckets.map(\.id) == ["unassigned"], "bare personal \(bare.classes[1].buckets.map(\.id))")
         expect(bare.classes[1].seconds == 3600, "bare personal seconds")
+
+        var underWork = Preferences.standard
+        underWork.buckets[0].parent = Bucket.work.id
+        let movedClass = rollup(payload, preferences: underWork)
+        expect(movedClass.classes[0].seconds == 5400, "entertainment under work joins work \(movedClass.classes[0].seconds)")
+        expect(movedClass.classes[0].buckets.map(\.id) == ["entertainment"], "work bucket \(movedClass.classes[0].buckets.map(\.id))")
+        expect(movedClass.classes[1].buckets.map(\.id) == ["communication"], "personal keeps communication")
+
+        var assignedPersonal = Preferences.standard
+        assignedPersonal.assignments["app:ghostty"] = Bucket.personal.id
+        let loose = rollup(payload, preferences: assignedPersonal)
+        expect(loose.classes[0].seconds == 0, "direct personal leaves work")
+        expect(loose.classes[1].buckets.first { $0.id == "unassigned" }?.seconds == 3600, "direct personal is unassigned")
+
+        let heavy = DayPayload(day: "2026-09-25", devices: [
+            DeviceDay(
+                deviceId: "mac",
+                deviceName: "Mac",
+                hostname: "Mac",
+                platform: "macos",
+                screenSeconds: 5100,
+                engagedSeconds: 5100,
+                byCategory: [
+                    CategorySeconds(category: "app:ghostty", seconds: 100),
+                    CategorySeconds(category: "youtube", seconds: 5000),
+                ],
+                byApp: [],
+                hours: []
+            ),
+        ])
+        let heavySlices = usageSlices(day: rollup(heavy, preferences: .standard), week: nil)
+        expect(heavySlices.map(\.id) == ["entertainment", "work"], "largest bucket leads \(heavySlices.map(\.id))")
+
+        let monday = DayPayload(day: "2026-09-21", devices: [
+            DeviceDay(
+                deviceId: "phone",
+                deviceName: "Nothing Phone (2)",
+                hostname: "phone",
+                platform: "android",
+                screenSeconds: 600,
+                engagedSeconds: 600,
+                byCategory: [CategorySeconds(category: "youtube", seconds: 600)],
+                byApp: [],
+                hours: []
+            ),
+        ])
+        let week = rollupWeek([payload, monday], day: "2026-09-25", preferences: .standard)
+        expect(week.classes[0].seconds == 3600, "week work \(week.classes[0].seconds)")
+        expect(week.classes[1].seconds == 4200, "week personal \(week.classes[1].seconds)")
+        expect(week.classes[1].buckets.first { $0.id == "entertainment" }?.seconds == 2400, "week entertainment")
+        expect(rolled.devices.first?.platform == "macos", "mac platform")
+        expect(rolled.devices.last?.platform == "android", "phone platform")
 
         var custom = Preferences.standard
         custom.buckets.append(Bucket(id: "reading", name: "Reading"))
