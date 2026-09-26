@@ -13,6 +13,8 @@ The VPS does not decide "too much" yet. It only stores the files.
 
 Day boundary is `Asia/Kolkata`. Each run **replaces** that device's file for the day. Unplugged phone time stays on the phone and is included the next time it is plugged in.
 
+ActivityWatch's HTTP server on the phone listens on `127.0.0.1:5600` only while its foreground service is running. Android can bring the accessibility and notification watchers back without that service, and then port 5600 is closed even though the phone is plugged in and usage is still stored. `aw_android.py` opens the ActivityWatch screen to start the service, reads the day, and returns to the app that was in front.
+
 ## Where the files are
 
 SSH: `ssh pact@pact-host` (Tailscale). Do not restart `pact.service`. `sudo` on that host asks for a password, and the live app is `/opt/pact` (source checkout on this Mac: `../toolkit`). No HTTP route was added. Shipping is an SSH write.
@@ -38,7 +40,7 @@ Schema is `1`, `source` is `activitywatch`. Segments have `app`, `title`, `url`,
 
 ```bash
 cd ~/pact
-python3 -m unittest collector.test_aw_usage
+python3 -m unittest collector.test_aw_usage collector.test_aw_android
 python3 collector/aw_ship.py --dry-run
 python3 collector/aw_android.py --dry-run
 ```
@@ -50,7 +52,7 @@ python3 collector/aw_android.py --dry-run
 | `app.pact.aw-ship` | `~/Library/Logs/pact-aw-ship.log` |
 | `app.pact.aw-ship-android` | `~/Library/Logs/pact-aw-ship-android.log` |
 
-The phone agent exits quietly when nothing is plugged in.
+The phone agent exits quietly when nothing is plugged in. If the phone is plugged in and port 5600 is closed, that run opens ActivityWatch so the server starts.
 
 ## Menu bar
 

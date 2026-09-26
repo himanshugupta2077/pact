@@ -2,6 +2,11 @@
 """Ship ActivityWatch from a USB-connected Android phone to the toolkit VPS.
 
 The ActivityWatch app on the phone keeps its server on 127.0.0.1:5600.
+That server runs only while the app's foreground service is up. Android can
+restart the watchers without that service, so a plugged-in phone may still
+refuse port 5600. This opens the ActivityWatch screen long enough to start
+the server, then returns to the app that was in front.
+
 This forwards that port over adb, reads the same buckets the app recorded,
 and replaces today's file for that phone next to the Mac's file.
 
@@ -20,6 +25,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import urllib.error
 from pathlib import Path
 
@@ -28,10 +34,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import aw_ship  # noqa: E402
 
 AW_PACKAGE = "net.activitywatch.android"
+AW_ACTIVITY = f"{AW_PACKAGE}/.MainActivity"
+PHONE_SERVER_PORT = 5600
 LOCAL_PORT = 5601
 TOKEN_PATH = Path.home() / ".config" / "pact-aw" / "android-token"
 LABEL = "app.pact.aw-ship-android"
+SERVER_WAIT_SECONDS = 20
 _TOKEN_RE = re.compile(r"token=([0-9a-fA-F-]{36})")
+_FOCUS_RE = re.compile(
+    r"topResumedActivity=ActivityRecord\{[^\s]+\s+\S+\s+(\S+/\S+)"
+)
 
 
 def adb_executable() -> str:
@@ -149,8 +161,66 @@ def resolve_token(serial: str) -> str:
     )
 
 
+def proc_net_has_listen(text: str, port: int) -> bool:
+    """True when /proc/net/tcp output shows `port` in TCP LISTEN (state 0A)."""
+    want = f"{port:04X}"
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) < 4 or ":" not in parts[1]:
+            continue
+        local_port = parts[1].rsplit(":", 1)[-1].upper()
+        if local_port == want and parts[3].upper() == "0A":
+            return True
+    return False
+
+
+def foreground_component(dumpsys: str) -> str:
+    match = _FOCUS_RE.search(dumpsys)
+    return match.group(1) if match else ""
+
+
+def server_listening(serial: str) -> bool:
+    done = adb(serial, "shell", "cat", "/proc/net/tcp", "/proc/net/tcp6", check=False)
+    return proc_net_has_listen(done.stdout, PHONE_SERVER_PORT)
+
+
+def ensure_phone_server(serial: str) -> None:
+    """Start ActivityWatch's on-device server if port 5600 is closed.
+
+    The server lives in BackgroundService, which is not exported, so adb cannot
+    start it directly. Opening MainActivity is what starts that service.
+    """
+    if server_listening(serial):
+        return
+    focus = adb(serial, "shell", "dumpsys", "activity", "activities", check=False)
+    previous = foreground_component(focus.stdout)
+    started = adb(serial, "shell", "am", "start", "-n", AW_ACTIVITY, check=False)
+    if started.returncode != 0:
+        detail = (started.stderr or started.stdout).strip()
+        raise SystemExit(f"Could not open ActivityWatch on the phone: {detail}")
+    deadline = time.monotonic() + SERVER_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        if server_listening(serial):
+            break
+        time.sleep(0.4)
+    else:
+        raise SystemExit(
+            "ActivityWatch on the phone is not serving data. "
+            "Open the ActivityWatch app once, then run this again."
+        )
+    if previous.startswith(AW_PACKAGE + "/"):
+        return
+    if previous:
+        restored = adb(serial, "shell", "am", "start", "-n", previous, check=False)
+        detail = (restored.stderr or restored.stdout or "")
+        if restored.returncode == 0 and "Error:" not in detail:
+            return
+    adb(serial, "shell", "input", "keyevent", "KEYCODE_HOME", check=False)
+
+
 def gather_phone(serial: str, day: str | None):
-    forwarded = adb(serial, "forward", f"tcp:{LOCAL_PORT}", "tcp:5600", check=False)
+    ensure_phone_server(serial)
+    forwarded = adb(serial, "forward", f"tcp:{LOCAL_PORT}", f"tcp:{PHONE_SERVER_PORT}", check=False)
     if forwarded.returncode != 0:
         detail = (forwarded.stderr or forwarded.stdout).strip()
         raise SystemExit(f"adb forward failed: {detail}")
