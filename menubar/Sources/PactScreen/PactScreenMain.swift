@@ -62,12 +62,17 @@ enum Dump {
             }
             print("categories \(rolled.categories.count)")
             print("hours \(rolled.hours.filter { $0.seconds > 0 }.count)")
-            if render, let png = renderPNG(model, settings: false) {
+            if render, let png = renderPNG(model, settings: false, expanded: false) {
                 let url = URL(fileURLWithPath: "/tmp/pact-screen.png")
                 try png.write(to: url)
                 print("rendered \(url.path)")
             }
-            if CommandLine.arguments.contains("--settings"), let png = renderPNG(model, settings: true) {
+            if render, let png = renderPNG(model, settings: false, expanded: true) {
+                let url = URL(fileURLWithPath: "/tmp/pact-screen-open.png")
+                try png.write(to: url)
+                print("rendered \(url.path)")
+            }
+            if CommandLine.arguments.contains("--settings"), let png = renderPNG(model, settings: true, expanded: false) {
                 let url = URL(fileURLWithPath: "/tmp/pact-screen-settings.png")
                 try png.write(to: url)
                 print("rendered \(url.path)")
@@ -81,11 +86,13 @@ enum Dump {
     }
 
     @MainActor
-    private static func renderPNG(_ model: AppModel, settings: Bool) -> Data? {
+    private static func renderPNG(_ model: AppModel, settings: Bool, expanded: Bool) -> Data? {
         let panel = PanelController(model: model)
         panel.loadView()
         if settings { panel.revealSettings() }
-        let size = NSSize(width: PanelController.preferredSize.width, height: settings ? 1280 : 980)
+        if expanded { panel.revealCategories() }
+        let height: CGFloat = settings ? 1280 : (expanded ? 1400 : 980)
+        let size = NSSize(width: PanelController.preferredSize.width, height: height)
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.borderless],

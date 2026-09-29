@@ -39,6 +39,9 @@ enum PactScreenChecks {
         expect(formatDuration(3600) == "1h", "hour")
         expect(formatDuration(5400) == "1h 30m", "hour and minutes")
         expect(formatDuration(7200) == "2h", "two hours")
+        expect(percentText(3720, of: 7200) == "52%", "share of the day \(percentText(3720, of: 7200))")
+        expect(percentText(0, of: 0) == "0%", "empty share")
+        expect(percentText(9, of: 7265) == "<1%", "tiny share \(percentText(9, of: 7265))")
 
         do {
             let json = """
@@ -252,6 +255,44 @@ enum PactScreenChecks {
         ])
         let heavySlices = usageSlices(day: rollup(heavy, preferences: .standard), week: nil)
         expect(heavySlices.map(\.id) == ["entertainment", "work"], "largest bucket leads \(heavySlices.map(\.id))")
+
+        let workPieces = classConstituents(rolled, classId: Bucket.work.id)
+        expect(workPieces.map(\.name) == ["Ghostty"], "work opens to its apps \(workPieces.map(\.name))")
+        expect(workPieces.first?.seconds == 3600, "ghostty fills work")
+        let personalPieces = classConstituents(rolled, classId: Bucket.personal.id)
+        expect(personalPieces.map(\.id) == ["communication", "entertainment"], "personal opens to groups \(personalPieces.map(\.id))")
+        expect(personalPieces.first { $0.id == "entertainment" }?.children.map(\.name) == ["YouTube"], "entertainment holds YouTube")
+        expect(personalPieces.first { $0.id == "communication" }?.children.map(\.name) == ["WhatsApp"], "communication holds WhatsApp")
+
+        let movedPieces = classConstituents(movedClass, classId: Bucket.work.id)
+        expect(movedPieces.map(\.name) == ["Ghostty", "YouTube"], "a work bucket's apps sit under work \(movedPieces.map(\.name))")
+        expect(classConstituents(movedClass, classId: Bucket.personal.id).map(\.id) == ["communication"], "personal keeps its remaining group")
+        expect(classConstituents(loose, classId: Bucket.personal.id).first?.id == Bucket.unassigned.id, "direct personal stays unassigned")
+        expect(
+            classConstituents(loose, classId: Bucket.personal.id).first?.children.map(\.name) == ["Ghostty"],
+            "unassigned names the app"
+        )
+
+        let sites = DayPayload(day: "2026-09-25", devices: [
+            DeviceDay(
+                deviceId: "mac",
+                deviceName: "Mac",
+                hostname: "Mac",
+                platform: "macos",
+                screenSeconds: 350,
+                engagedSeconds: 350,
+                byCategory: [
+                    CategorySeconds(category: "app:ghostty", seconds: 200),
+                    CategorySeconds(category: "site:github.com", seconds: 100),
+                    CategorySeconds(category: "site:example.com", seconds: 50),
+                ],
+                byApp: [],
+                hours: []
+            ),
+        ])
+        let sitePieces = classConstituents(rollup(sites, preferences: .standard), classId: Bucket.work.id)
+        expect(sitePieces.map(\.name) == ["Ghostty", "URLs"], "sites stay grouped \(sitePieces.map(\.name))")
+        expect(sitePieces.last?.children.map(\.name) == ["github.com", "example.com"], "url order \(sitePieces.last?.children.map(\.name) ?? [])")
 
         let monday = DayPayload(day: "2026-09-21", devices: [
             DeviceDay(

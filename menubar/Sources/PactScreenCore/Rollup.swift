@@ -341,6 +341,73 @@ private extension CategoryGroup {
     var sortName: String { title ?? rows.first?.name ?? "" }
 }
 
+public struct BreakdownItem: Equatable, Sendable, Identifiable {
+    public var id: String
+    public var name: String
+    public var seconds: Double
+    public var colorId: String
+    public var children: [BreakdownItem]
+
+    public init(id: String, name: String, seconds: Double, colorId: String, children: [BreakdownItem] = []) {
+        self.id = id
+        self.name = name
+        self.seconds = seconds
+        self.colorId = colorId
+        self.children = children
+    }
+}
+
+/// What makes up one class on this day.
+/// Work is the apps and URLs counted as work. Sites stay under one URLs row.
+/// Personal is its buckets, each holding the apps and URLs inside that bucket.
+public func classConstituents(_ rollup: DayRollup, classId: String) -> [BreakdownItem] {
+    if classId == Bucket.work.id {
+        let nested = Set(rollup.classes.first { $0.id == Bucket.work.id }?.buckets.map(\.id) ?? [])
+        let ids = nested.union([Bucket.work.id])
+        let rows = rollup.categories.filter { ids.contains($0.bucketId) && $0.seconds > 0.5 }
+        return breakdownItems(rows, scope: Bucket.work.id, scopeColor: Bucket.work.id)
+    }
+    if classId == Bucket.personal.id {
+        let buckets = rollup.classes.first { $0.id == Bucket.personal.id }?.buckets ?? []
+        return buckets.filter { $0.seconds > 0.5 }.map { bucket in
+            let rows = rollup.categories.filter { row in
+                guard row.seconds > 0.5 else { return false }
+                if row.bucketId == bucket.id { return true }
+                return bucket.id == Bucket.unassigned.id
+                    && (row.bucketId == Bucket.personal.id || row.bucketId == Bucket.unassigned.id)
+            }
+            return BreakdownItem(
+                id: bucket.id,
+                name: bucket.name,
+                seconds: bucket.seconds,
+                colorId: bucket.id,
+                children: breakdownItems(rows, scope: bucket.id, scopeColor: bucket.id)
+            )
+        }
+    }
+    return []
+}
+
+private func breakdownItems(_ rows: [CategoryRow], scope: String, scopeColor: String) -> [BreakdownItem] {
+    categoryGroups(rows).map { group in
+        if let title = group.title {
+            let colors = Set(group.rows.map(\.bucketId))
+            return BreakdownItem(
+                id: "urls:\(scope)",
+                name: title,
+                seconds: group.seconds,
+                colorId: colors.count == 1 ? (colors.first ?? scopeColor) : scopeColor,
+                children: group.rows.map(leafItem)
+            )
+        }
+        return leafItem(group.rows[0])
+    }
+}
+
+private func leafItem(_ row: CategoryRow) -> BreakdownItem {
+    BreakdownItem(id: row.category, name: row.name, seconds: row.seconds, colorId: row.bucketId)
+}
+
 extension DayRollup {
     public static func empty(day: String) -> DayRollup {
         DayRollup(

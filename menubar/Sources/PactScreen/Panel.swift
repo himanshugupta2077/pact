@@ -35,8 +35,7 @@ final class PanelController: NSViewController, NSTextFieldDelegate {
     static let preferredSize = NSSize(width: 480, height: 740)
 
     private let timeColumnWidth: CGFloat = 64
-    private let graphSize: CGFloat = 120
-    private let graphGap: CGFloat = 12
+    private let percentColumnWidth: CGFloat = 84
 
     private let model: AppModel
     private var chart = 0
@@ -82,6 +81,8 @@ final class PanelController: NSViewController, NSTextFieldDelegate {
     private let deviceToggle = NSButton(checkboxWithTitle: "Each device", target: nil, action: nil)
     private let deviceFieldStack = Panel.vstack(6)
     private weak var scrollView: NSScrollView?
+    /// Work, Personal, and any open personal group. Survives a refresh.
+    private var openSections: Set<String> = []
 
     init(model: AppModel) {
         self.model = model
@@ -122,13 +123,23 @@ final class PanelController: NSViewController, NSTextFieldDelegate {
         render()
     }
 
+    /// Opens Work, Personal, and each personal group. Used by the render dump.
+    func revealCategories() {
+        openSections = [Bucket.work.id, Bucket.personal.id]
+        if let rollup = model.dayRollup {
+            for item in classConstituents(rollup, classId: Bucket.personal.id) {
+                openSections.insert(item.id)
+            }
+        }
+        render()
+    }
+
     private func watch() {
         withObservationTracking { [weak self] in
             guard let self else { return }
             _ = self.model.day
             _ = self.model.freshness
             _ = self.model.dayRollup
-            _ = self.model.weekRollup
             _ = self.model.preferences
             _ = self.model.refreshing
             _ = self.model.errorText
@@ -359,6 +370,7 @@ final class PanelController: NSViewController, NSTextFieldDelegate {
     }
 
     private func render() {
+        let savedOffset = scrollView?.contentView.bounds.origin
         let day = model.day.isEmpty ? DayClock.today() : model.day
         dateLabel.stringValue = formatDay(day)
         freshnessLabel.stringValue = model.freshness
@@ -383,12 +395,11 @@ final class PanelController: NSViewController, NSTextFieldDelegate {
         }
 
         let daySeconds = model.dayRollup?.screenSeconds ?? 0
-        let weekSeconds = model.weekRollup?.screenSeconds ?? 0
-        let hasTime = daySeconds > 0 || weekSeconds > 0
+        let hasTime = daySeconds > 0
         emptyLabel.isHidden = hasTime
         mainStack.isHidden = !hasTime
         if !hasTime {
-            if model.refreshing, model.dayRollup == nil && model.weekRollup == nil {
+            if model.refreshing, model.dayRollup == nil {
                 emptyLabel.stringValue = "Fetching from the VPS…"
             } else if let error = model.errorText, model.dayRollup == nil {
                 emptyLabel.stringValue = error
@@ -405,137 +416,242 @@ final class PanelController: NSViewController, NSTextFieldDelegate {
         renderBreakdown(rollup)
         renderDevices(model.dayRollup)
         renderChart(model.dayRollup)
+        restoreScroll(savedOffset)
+    }
+
+    private func restoreScroll(_ origin: NSPoint?) {
+        guard let origin, let scrollView else { return }
+        scrollView.layoutSubtreeIfNeeded()
+        let clip = scrollView.contentView
+        clip.scroll(to: origin)
+        scrollView.reflectScrolledClipView(clip)
     }
 
     private func renderBreakdown(_ rollup: DayRollup) {
         Panel.clear(categorySection)
-        let slices = usageSlices(day: rollup, week: model.weekRollup)
-        let workChildren = rollup.classes.first { $0.id == Bucket.work.id }?.buckets ?? []
-        // The Work class row already shows direct work. List that slice only as a remainder next to work buckets.
-        let listSlices = slices.filter { slice in
-            slice.id != Bucket.work.id || !workChildren.isEmpty
-        }
-        let showGraph = slices.contains { $0.seconds > 0.5 }
-        let reserve: CGFloat = showGraph ? graphSize + graphGap : 0
+        let total = rollup.screenSeconds
 
         let heading = Panel.hstack(8)
         heading.addArrangedSubview(Panel.caption("Categories", size: 13, weight: .semibold, color: .labelColor))
-        heading.addArrangedSubview(Panel.spacer())
-        let rangeText = formatWeekRange(containing: rollup.day.isEmpty ? model.day : rollup.day)
-        heading.addArrangedSubview(Panel.caption(rangeText, size: 12, weight: .regular, color: .secondaryLabelColor))
         categorySection.addArrangedSubview(heading)
         Panel.pin(heading, to: categorySection)
 
-        let header = columnHeader(reserve: reserve)
+        let header = columnHeader()
         categorySection.addArrangedSubview(header)
         Panel.pin(header, to: categorySection)
 
-        let classes = Panel.vstack(4)
+        let list = Panel.vstack(2)
         for id in [Bucket.work.id, Bucket.personal.id] {
             let name = id == Bucket.work.id ? Bucket.work.name : Bucket.personal.name
-            let daySeconds = rollup.classes.first { $0.id == id }?.seconds ?? 0
-            let weekSeconds = model.weekRollup?.classes.first { $0.id == id }?.seconds ?? 0
-            let row = metricRow(name: name, color: BucketPalette.color(id), day: daySeconds, week: weekSeconds, strong: true, reserve: reserve)
-            classes.addArrangedSubview(row)
-            Panel.pin(row, to: classes)
-        }
-        categorySection.addArrangedSubview(classes)
-        Panel.pin(classes, to: categorySection)
-
-        let list = Panel.vstack(5)
-        if listSlices.isEmpty && !showGraph {
-            list.addArrangedSubview(Panel.wrapping("No buckets for this day."))
-        }
-        for slice in listSlices {
-            let row = metricRow(
-                name: slice.name,
-                color: BucketPalette.color(slice.id),
-                day: slice.seconds,
-                week: slice.weekSeconds,
-                strong: false,
-                reserve: 0
+            let seconds = rollup.classes.first { $0.id == id }?.seconds ?? 0
+            let items = classConstituents(rollup, classId: id)
+            let canOpen = seconds > 0.5 || !items.isEmpty
+            let open = canOpen && openSections.contains(id)
+            addRow(
+                to: list,
+                name: name,
+                color: BucketPalette.color(id),
+                seconds: seconds,
+                total: total,
+                strong: true,
+                indent: 0,
+                disclosure: disclosure(canOpen: canOpen, open: open),
+                onClick: canOpen ? { [weak self] in self?.toggleSection(id) } : nil
             )
-            list.addArrangedSubview(row)
-            Panel.pin(row, to: list)
-        }
-
-        if showGraph {
-            let split = NSView()
-            split.translatesAutoresizingMaskIntoConstraints = false
-            list.translatesAutoresizingMaskIntoConstraints = false
-            let donut = DonutChartView()
-            donut.parts = slices.filter { $0.seconds > 0.5 }.map {
-                BucketTotal(id: $0.id, name: $0.name, seconds: $0.seconds)
+            guard open else { continue }
+            if id == Bucket.work.id {
+                if items.isEmpty {
+                    addNote("Nothing in Work for this day.", indent: 28, to: list)
+                } else {
+                    appendLeaves(items, total: total, indent: 18, to: list)
+                }
+            } else if items.isEmpty {
+                addNote("Nothing in Personal for this day.", indent: 28, to: list)
+            } else {
+                for item in items {
+                    let hasChildren = !item.children.isEmpty
+                    let groupOpen = hasChildren && openSections.contains(item.id)
+                    addRow(
+                        to: list,
+                        name: item.name,
+                        color: BucketPalette.color(item.colorId),
+                        seconds: item.seconds,
+                        total: total,
+                        strong: false,
+                        indent: 18,
+                        disclosure: disclosure(canOpen: hasChildren, open: groupOpen),
+                        onClick: hasChildren ? { [weak self] in self?.toggleSection(item.id) } : nil
+                    )
+                    if groupOpen {
+                        appendLeaves(item.children, total: total, indent: 36, to: list)
+                    }
+                }
             }
-            donut.translatesAutoresizingMaskIntoConstraints = false
-            split.addSubview(list)
-            split.addSubview(donut)
-            NSLayoutConstraint.activate([
-                list.topAnchor.constraint(equalTo: split.topAnchor),
-                list.leadingAnchor.constraint(equalTo: split.leadingAnchor),
-                list.bottomAnchor.constraint(equalTo: split.bottomAnchor),
-                donut.topAnchor.constraint(equalTo: split.topAnchor, constant: 2),
-                donut.trailingAnchor.constraint(equalTo: split.trailingAnchor),
-                donut.leadingAnchor.constraint(equalTo: list.trailingAnchor, constant: graphGap),
-                donut.widthAnchor.constraint(equalToConstant: graphSize),
-                donut.heightAnchor.constraint(equalToConstant: graphSize),
-                split.heightAnchor.constraint(greaterThanOrEqualToConstant: graphSize),
-            ])
-            categorySection.addArrangedSubview(split)
-            Panel.pin(split, to: categorySection)
+        }
+        categorySection.addArrangedSubview(list)
+        Panel.pin(list, to: categorySection)
+    }
+
+    private func toggleSection(_ id: String) {
+        if openSections.contains(id) {
+            openSections.remove(id)
         } else {
-            categorySection.addArrangedSubview(list)
-            Panel.pin(list, to: categorySection)
+            openSections.insert(id)
+        }
+        render()
+    }
+
+    private func disclosure(canOpen: Bool, open: Bool) -> Disclosure {
+        guard canOpen else { return .none }
+        return open ? .open : .closed
+    }
+
+    /// Apps, and a URLs row with each site under it. No extra click.
+    private func appendLeaves(_ items: [BreakdownItem], total: Double, indent: CGFloat, to list: NSStackView) {
+        for item in items {
+            addRow(
+                to: list,
+                name: item.name,
+                color: BucketPalette.color(item.colorId),
+                seconds: item.seconds,
+                total: total,
+                strong: false,
+                indent: indent,
+                disclosure: .none,
+                onClick: nil
+            )
+            if !item.children.isEmpty {
+                appendLeaves(item.children, total: total, indent: indent + 16, to: list)
+            }
         }
     }
 
-    private func columnHeader(reserve: CGFloat) -> NSView {
+    private func addNote(_ text: String, indent: CGFloat, to list: NSStackView) {
+        let row = Panel.hstack(8)
+        row.addArrangedSubview(Panel.gap(indent))
+        let note = Panel.wrapping(text)
+        row.addArrangedSubview(note)
+        list.addArrangedSubview(row)
+        Panel.pin(row, to: list)
+    }
+
+    private func addRow(
+        to list: NSStackView,
+        name: String,
+        color: NSColor,
+        seconds: Double,
+        total: Double,
+        strong: Bool,
+        indent: CGFloat,
+        disclosure: Disclosure,
+        onClick: (() -> Void)?
+    ) {
+        let row = metricRow(
+            name: name,
+            color: color,
+            seconds: seconds,
+            total: total,
+            strong: strong,
+            indent: indent,
+            disclosure: disclosure,
+            onClick: onClick
+        )
+        list.addArrangedSubview(row)
+        Panel.pin(row, to: list)
+    }
+
+    private func columnHeader() -> NSView {
         let row = Panel.hstack(8)
         row.addArrangedSubview(Panel.spacer())
-        row.addArrangedSubview(timeCaption("Day"))
-        row.addArrangedSubview(timeCaption("Week"))
-        appendReserve(reserve, to: row)
+        row.addArrangedSubview(timeCaption("Day", width: timeColumnWidth))
+        row.addArrangedSubview(timeCaption("Percentage", width: percentColumnWidth))
         return row
     }
 
-    private func timeCaption(_ text: String) -> NSTextField {
+    private func timeCaption(_ text: String, width: CGFloat) -> NSTextField {
         let field = Panel.caption(text, size: 11, weight: .medium, color: .secondaryLabelColor)
         field.alignment = .right
         field.font = .systemFont(ofSize: 11, weight: .medium)
-        field.widthAnchor.constraint(equalToConstant: timeColumnWidth).isActive = true
+        field.widthAnchor.constraint(equalToConstant: width).isActive = true
         return field
     }
 
-    private func metricRow(name: String, color: NSColor, day: Double, week: Double, strong: Bool, reserve: CGFloat) -> NSView {
+    private func metricRow(
+        name: String,
+        color: NSColor,
+        seconds: Double,
+        total: Double,
+        strong: Bool,
+        indent: CGFloat,
+        disclosure: Disclosure,
+        onClick: (() -> Void)?
+    ) -> NSView {
         let row = Panel.hstack(8)
         let weight: NSFont.Weight = strong ? .semibold : .regular
+        if indent > 0 {
+            row.addArrangedSubview(Panel.gap(indent))
+        }
+        row.addArrangedSubview(disclosureMark(disclosure))
         row.addArrangedSubview(DotView(color: color))
-        row.addArrangedSubview(Panel.caption(name, size: 13, weight: weight, color: .labelColor))
+        let title = Panel.caption(name, size: 13, weight: weight, color: .labelColor)
+        title.toolTip = name
+        row.addArrangedSubview(title)
         row.addArrangedSubview(Panel.spacer())
-        let dayLabel = timeValue(formatDuration(day), weight: weight, primary: true)
-        let weekLabel = timeValue(formatDuration(week), weight: weight, primary: false)
+        let dayLabel = timeValue(formatDuration(seconds), weight: weight, width: timeColumnWidth, primary: true)
+        let share = timeValue(percentText(seconds, of: total), weight: weight, width: percentColumnWidth, primary: false)
         row.addArrangedSubview(dayLabel)
-        row.addArrangedSubview(weekLabel)
-        appendReserve(reserve, to: row)
+        row.addArrangedSubview(share)
         dayLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-        weekLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-        return row
+        share.setContentCompressionResistancePriority(.required, for: .horizontal)
+        guard let onClick else { return row }
+        let hit = ClickRow()
+        hit.onClick = onClick
+        hit.translatesAutoresizingMaskIntoConstraints = false
+        hit.addSubview(row)
+        NSLayoutConstraint.activate([
+            row.topAnchor.constraint(equalTo: hit.topAnchor, constant: 2),
+            row.bottomAnchor.constraint(equalTo: hit.bottomAnchor, constant: -2),
+            row.leadingAnchor.constraint(equalTo: hit.leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: hit.trailingAnchor),
+        ])
+        return hit
     }
 
-    private func timeValue(_ text: String, weight: NSFont.Weight, primary: Bool) -> NSTextField {
+    private func disclosureMark(_ state: Disclosure) -> NSView {
+        let symbol: String?
+        let tip: String
+        switch state {
+        case .none:
+            symbol = nil
+            tip = ""
+        case .closed:
+            symbol = "chevron.right"
+            tip = "Show"
+        case .open:
+            symbol = "chevron.down"
+            tip = "Hide"
+        }
+        guard let symbol, let image = NSImage(systemSymbolName: symbol, accessibilityDescription: tip) else {
+            return Panel.gap(12)
+        }
+        image.isTemplate = true
+        let icon = NSImageView()
+        icon.image = image
+        icon.contentTintColor = .tertiaryLabelColor
+        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 9, weight: .bold)
+        icon.imageScaling = .scaleProportionallyDown
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.widthAnchor.constraint(equalToConstant: 12).isActive = true
+        icon.heightAnchor.constraint(equalToConstant: 12).isActive = true
+        return icon
+    }
+
+    private func timeValue(_ text: String, weight: NSFont.Weight, width: CGFloat, primary: Bool) -> NSTextField {
         let field = Panel.caption(text, size: 13, weight: weight, color: primary ? .labelColor : .secondaryLabelColor)
         field.font = .monospacedDigitSystemFont(ofSize: 13, weight: weight)
         field.alignment = .right
-        field.widthAnchor.constraint(equalToConstant: timeColumnWidth).isActive = true
+        field.widthAnchor.constraint(equalToConstant: width).isActive = true
         return field
-    }
-
-    private func appendReserve(_ reserve: CGFloat, to row: NSStackView) {
-        guard reserve > 0 else { return }
-        let pad = NSView()
-        pad.translatesAutoresizingMaskIntoConstraints = false
-        pad.widthAnchor.constraint(equalToConstant: reserve).isActive = true
-        row.addArrangedSubview(pad)
     }
 
     private func renderDevices(_ rollup: DayRollup?) {
@@ -1147,6 +1263,13 @@ private enum Panel {
         return view
     }
 
+    static func gap(_ width: CGFloat) -> NSView {
+        let view = NSView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.widthAnchor.constraint(equalToConstant: width).isActive = true
+        return view
+    }
+
     static func hairline() -> NSView {
         let view = NSView()
         view.translatesAutoresizingMaskIntoConstraints = false
@@ -1296,67 +1419,32 @@ private final class MeterView: NSView {
     }
 }
 
-private final class DonutChartView: NSView {
-    var parts: [BucketTotal] = [] { didSet { needsDisplay = true } }
+private enum Disclosure {
+    case none
+    case closed
+    case open
+}
 
-    override func draw(_ dirtyRect: NSRect) {
-        let side = min(bounds.width, bounds.height)
-        guard side > 8 else { return }
-        let center = NSPoint(x: bounds.midX, y: bounds.midY)
-        let radius = side / 2 - 10
-        let total = parts.reduce(0) { $0 + $1.seconds }
-        let track = NSBezierPath()
-        track.appendArc(withCenter: center, radius: radius, startAngle: 0, endAngle: 360, clockwise: false)
-        track.lineWidth = 16
-        NSColor.labelColor.withAlphaComponent(0.08).setStroke()
-        track.stroke()
-        guard total > 0 else { return }
-        let gap = parts.count > 1 ? 1.6 : 0
-        var cursor = 90.0
-        for part in parts {
-            let sweep = max(0, 360.0 * part.seconds / total - gap)
-            guard sweep > 0 else { continue }
-            let path = NSBezierPath()
-            path.appendArc(withCenter: center, radius: radius, startAngle: cursor, endAngle: cursor - sweep, clockwise: true)
-            path.lineWidth = 16
-            BucketPalette.color(part.id).setStroke()
-            path.stroke()
-            cursor -= 360.0 * part.seconds / total
+private final class ClickRow: NSView {
+    var onClick: (() -> Void)?
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard !isHidden else { return nil }
+        let local = convert(point, from: superview)
+        return bounds.contains(local) ? self : nil
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        // Rebuild the rows after this click returns. Removing the hit view mid-event crashes.
+        let action = onClick
+        DispatchQueue.main.async {
+            action?()
         }
     }
 
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        for area in trackingAreas { removeTrackingArea(area) }
-        addTrackingArea(NSTrackingArea(
-            rect: bounds,
-            options: [.mouseMoved, .activeAlways, .inVisibleRect],
-            owner: self
-        ))
-    }
-
-    override func mouseMoved(with event: NSEvent) {
-        let point = convert(event.locationInWindow, from: nil)
-        let total = parts.reduce(0) { $0 + $1.seconds }
-        guard total > 0, bounds.width > 0 else {
-            toolTip = nil
-            return
-        }
-        let dx = point.x - bounds.midX
-        let dy = point.y - bounds.midY
-        var offset = 90 - atan2(dy, dx) * 180 / .pi
-        while offset < 0 { offset += 360 }
-        while offset >= 360 { offset -= 360 }
-        var cursor = 0.0
-        for part in parts {
-            let sweep = 360.0 * part.seconds / total
-            if offset <= cursor + sweep {
-                toolTip = "\(part.name) \(formatDuration(part.seconds))"
-                return
-            }
-            cursor += sweep
-        }
-        toolTip = nil
+    override func resetCursorRects() {
+        discardCursorRects()
+        addCursorRect(bounds, cursor: .pointingHand)
     }
 }
 

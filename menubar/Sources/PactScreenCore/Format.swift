@@ -46,8 +46,10 @@ public func formatWeekRange(containing day: String) -> String {
 }
 
 public func percentText(_ part: Double, of whole: Double) -> String {
-    guard whole > 0 else { return "0%" }
-    return "\(Int((part / whole * 100).rounded()))%"
+    guard whole > 0, part > 0 else { return "0%" }
+    let rounded = Int((part / whole * 100).rounded())
+    if rounded <= 0 { return "<1%" }
+    return "\(rounded)%"
 }
 
 public func displayName(for category: String) -> String {
