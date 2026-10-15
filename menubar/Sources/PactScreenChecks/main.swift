@@ -365,6 +365,72 @@ enum PactScreenChecks {
         ])
         expect(cleaned.map(\.id) == ["gaming"], "cleaned \(cleaned.map(\.id))")
 
+        expect(screenTimeBand(seconds: 0) == .green, "zero is green")
+        expect(screenTimeBand(seconds: 3 * 3600 - 1) == .green, "just under 3h")
+        expect(screenTimeBand(seconds: 3 * 3600) == .yellow, "3h is yellow")
+        expect(screenTimeBand(seconds: 4 * 3600) == .yellow, "4h is yellow")
+        expect(screenTimeBand(seconds: 5 * 3600) == .yellow, "5h is yellow")
+        expect(screenTimeBand(seconds: 5 * 3600 + 1) == .red, "past 5h")
+        expect(spokenDuration(3600) == "1 hour", "spoken hour")
+        expect(spokenDuration(7200) == "2 hours", "spoken two hours")
+        expect(spokenDuration(5400) == "1 hour 30 minutes", "spoken hour and minutes")
+        expect(spokenDuration(60) == "1 minute", "spoken minute")
+        expect(noticeDeviceName("MacBook Air", override: nil) == "your MacBook", "mac name")
+        expect(noticeDeviceName("Nothing Phone (2)", override: nil) == "your Nothing Phone", "phone name")
+        expect(noticeDeviceName("Nothing Phone (2)", override: "  Pocket  ") == "Pocket", "label override")
+        expect(screenTimeMilestoneHour(seconds: 3599) == nil, "under an hour")
+        expect(screenTimeMilestoneHour(seconds: 3600) == 1, "one hour mark")
+        expect(screenTimeMilestoneHour(seconds: 7199) == 1, "still one hour")
+        expect(screenTimeMilestoneHour(seconds: 7200) == 2, "two hour mark")
+        expect(shouldSendScreenTimeNotice(day: "2026-10-15", hour: 2, previous: nil), "first notice")
+        expect(!shouldSendScreenTimeNotice(day: "2026-10-15", hour: 2, previous: NoticeMark(day: "2026-10-15", hour: 2)), "same hour once")
+        expect(shouldSendScreenTimeNotice(day: "2026-10-15", hour: 3, previous: NoticeMark(day: "2026-10-15", hour: 2)), "next hour")
+        expect(shouldSendScreenTimeNotice(day: "2026-10-16", hour: 1, previous: NoticeMark(day: "2026-10-15", hour: 8)), "new day")
+
+        let two = screenTimeNotice(
+            totalSeconds: 7200,
+            devices: [
+                NoticeDevice(name: "your MacBook", seconds: 3600),
+                NoticeDevice(name: "your Nothing Phone", seconds: 3600),
+            ]
+        )
+        expect(
+            two.discord == "Hey, you've used 2 hours of screen time today, 1 hour on your MacBook and 1 hour on your Nothing Phone. Slow down a bit. Use the screen for necessary stuff, not for passing time.",
+            "two hour notice \(two.discord)"
+        )
+        expect(two.title == "Hey, you've used 2 hours", "two hour title")
+        expect(two.body.hasPrefix("1 hour on your MacBook and 1 hour on your Nothing Phone."), "two hour body")
+
+        let four = screenTimeNotice(
+            totalSeconds: 4 * 3600,
+            devices: [
+                NoticeDevice(name: "your MacBook", seconds: 3 * 3600),
+                NoticeDevice(name: "your Nothing Phone", seconds: 3600),
+            ]
+        )
+        expect(four.discord.contains("4 hours of screen time today, 3 hours on your MacBook and 1 hour on your Nothing Phone."), "four hour split \(four.discord)")
+        expect(four.discord.contains("You're well into the day."), "yellow warning")
+
+        let six = screenTimeNotice(
+            totalSeconds: 6 * 3600,
+            devices: [NoticeDevice(name: "your MacBook", seconds: 6 * 3600)]
+        )
+        expect(six.discord.contains("all on your MacBook."), "single device \(six.discord)")
+        expect(six.discord.contains("stop the time-pass"), "red warning")
+
+        let three = screenTimeNotice(
+            totalSeconds: 3 * 3600,
+            devices: [
+                NoticeDevice(name: "your MacBook", seconds: 3600),
+                NoticeDevice(name: "your Nothing Phone", seconds: 3600),
+                NoticeDevice(name: "your laptop", seconds: 3600),
+            ]
+        )
+        expect(
+            three.body.hasPrefix("1 hour on your MacBook, 1 hour on your Nothing Phone, and 1 hour on your laptop."),
+            "three devices \(three.body)"
+        )
+
         if failed > 0 {
             fputs("\(failed) failed\n", stderr)
             exit(1)

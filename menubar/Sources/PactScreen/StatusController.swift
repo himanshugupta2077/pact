@@ -1,10 +1,14 @@
 import AppKit
+import PactScreenCore
 
 @MainActor
 final class StatusController: NSObject, NSPopoverDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let popover = NSPopover()
     private let model: AppModel
+    private var shownTitle = ""
+    private var shownBand: ScreenTimeBand?
+    private var themeObserver: NSObjectProtocol?
     private var catcher: NSWindow?
     private var globalMonitor: Any?
     private var resignObserver: NSObjectProtocol?
@@ -19,24 +23,42 @@ final class StatusController: NSObject, NSPopoverDelegate {
         popover.delegate = self
         popover.contentSize = PanelController.preferredSize
         if let button = statusItem.button {
-            let image = NSImage(systemSymbolName: "hourglass", accessibilityDescription: "Screen time")
-            image?.isTemplate = true
-            button.image = image
-            button.imagePosition = .imageLeading
-            button.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
             button.target = self
             button.action = #selector(click)
+            button.imageScaling = .scaleNone
+            button.imagePosition = .imageOnly
         }
-        applyTitle(model.menuTitle)
-        model.onMenuTitle = { [weak self] title in
-            self?.applyTitle(title)
+        model.onMenu = { [weak self] title, band in
+            self?.apply(title: title, band: band)
+        }
+        apply(title: model.menuTitle, band: model.menuBand)
+        themeObserver = DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("AppleInterfaceThemeChangedNotification"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.paint()
+            }
         }
     }
 
-    func applyTitle(_ title: String) {
-        statusItem.button?.title = " " + title
-        statusItem.button?.setAccessibilityLabel("Screen time \(title)")
-        statusItem.button?.toolTip = "Pact screen time"
+    func apply(title: String, band: ScreenTimeBand?) {
+        shownTitle = title
+        shownBand = band
+        paint()
+    }
+
+    private func paint() {
+        guard let button = statusItem.button else { return }
+        let image = Self.renderedTitle(shownTitle, band: shownBand, appearance: button.effectiveAppearance)
+        image.isTemplate = false
+        button.image = image
+        button.image?.isTemplate = false
+        button.title = ""
+        statusItem.length = image.size.width
+        button.setAccessibilityLabel("Screen time \(shownTitle)")
+        button.toolTip = "Pact screen time"
     }
 
     @objc private func click() {
@@ -144,6 +166,76 @@ final class StatusController: NSObject, NSPopoverDelegate {
         }
         retireCatcher()
         closing = false
+    }
+}
+
+extension StatusController {
+    fileprivate static func renderedTitle(_ text: String, band: ScreenTimeBand?, appearance: NSAppearance) -> NSImage {
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+        let color = barColor(band: band, appearance: appearance)
+        let attributed = NSAttributedString(string: text, attributes: [
+            .font: font,
+            .foregroundColor: color,
+        ])
+        let bounds = attributed.boundingRect(
+            with: NSSize(width: 2400, height: 48),
+            options: [.usesLineFragmentOrigin, .usesFontLeading]
+        )
+        let size = NSSize(width: max(10, ceil(bounds.width) + 10), height: 22)
+        let scale = max(1, NSScreen.main?.backingScaleFactor ?? 2)
+        let pixelsWide = max(1, Int((size.width * scale).rounded(.up)))
+        let pixelsHigh = max(1, Int((size.height * scale).rounded(.up)))
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: pixelsWide,
+            pixelsHigh: pixelsHigh,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            let fallback = NSImage(size: size)
+            fallback.isTemplate = false
+            return fallback
+        }
+        rep.size = size
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        NSColor.clear.set()
+        NSRect(origin: .zero, size: size).fill()
+        let y = (size.height - bounds.height) / 2 - bounds.origin.y
+        attributed.draw(in: NSRect(x: 5, y: y, width: ceil(bounds.width) + 2, height: ceil(bounds.height)))
+        NSGraphicsContext.restoreGraphicsState()
+        let image = NSImage(size: size)
+        image.addRepresentation(rep)
+        image.isTemplate = false
+        return image
+    }
+
+    private static func barColor(band: ScreenTimeBand?, appearance: NSAppearance) -> NSColor {
+        let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let color: NSColor = switch band {
+        case .green:
+            dark
+                ? NSColor(srgbRed: 0.30, green: 0.86, blue: 0.42, alpha: 1)
+                : NSColor(srgbRed: 0.10, green: 0.52, blue: 0.22, alpha: 1)
+        case .yellow:
+            dark
+                ? NSColor(srgbRed: 1.00, green: 0.82, blue: 0.20, alpha: 1)
+                : NSColor(srgbRed: 0.70, green: 0.48, blue: 0.00, alpha: 1)
+        case .red:
+            dark
+                ? NSColor(srgbRed: 1.00, green: 0.38, blue: 0.32, alpha: 1)
+                : NSColor(srgbRed: 0.82, green: 0.16, blue: 0.13, alpha: 1)
+        case nil:
+            dark
+                ? NSColor(srgbRed: 0.85, green: 0.85, blue: 0.88, alpha: 1)
+                : NSColor(srgbRed: 0.20, green: 0.20, blue: 0.22, alpha: 1)
+        }
+        return color
     }
 }
 

@@ -17,8 +17,9 @@ enum Store {
 @Observable
 final class AppModel {
     var menuTitle = "…"
+    var menuBand: ScreenTimeBand?
 
-    var onMenuTitle: ((String) -> Void)?
+    var onMenu: ((String, ScreenTimeBand?) -> Void)?
     var preferences = Preferences.standard
     var dayRollup: DayRollup?
     var weekRollup: DayRollup?
@@ -51,6 +52,7 @@ final class AppModel {
         followsToday = true
         loadCachedWeek()
         recompute()
+        announceToday()
         pruneCache()
         applyLoginItem()
         refresh()
@@ -202,6 +204,7 @@ final class AppModel {
                 saveCache(day: requestedDay, payload: empty, fetchedAt: when)
             }
             recompute()
+            announceToday()
         } catch {
             guard generation == refreshGeneration, requestedDay == day else { return }
             errorText = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -234,16 +237,24 @@ final class AppModel {
         let present = weekDays.compactMap { payloadsByDay[$0] }
         weekRollup = present.isEmpty ? nil : rollupWeek(present, day: day, preferences: prefs)
         if let dayRollup {
-            setTitle(menuBarTitle(for: dayRollup, preferences: prefs))
+            publishMenu(title: menuBarTitle(for: dayRollup, preferences: prefs), seconds: dayRollup.screenSeconds)
         } else {
-            setTitle("…")
+            publishMenu(title: "…", seconds: nil)
         }
     }
 
-    private func setTitle(_ title: String) {
-        guard title != menuTitle else { return }
+    private func publishMenu(title: String, seconds: Double?) {
+        let band = seconds.map { screenTimeBand(seconds: $0) }
+        guard title != menuTitle || band != menuBand else { return }
         menuTitle = title
-        onMenuTitle?(title)
+        menuBand = band
+        onMenu?(title, band)
+    }
+
+    /// One notice per whole hour of today's total. Browsing another day does not send.
+    private func announceToday() {
+        guard followsToday, day == DayClock.today(), let dayRollup else { return }
+        ScreenTimeNotifier.announce(day: day, rollup: dayRollup, preferences: preferences)
     }
 
     private func loadCachedWeek() {
