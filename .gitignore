@@ -16,3 +16,7 @@ app/release
 .grok/
 menubar/.build/
 menubar/PactScreen.app/
+pact.local.json
+pact.local.md
+__pycache__/
+*.pyc

@@ -2,8 +2,10 @@ package app.pact.ship
 
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.Build
 import android.provider.Settings
 import android.util.Log
+import app.pact.BuildConfig
 import app.pact.PactApp
 import app.pact.util.hasUsageAccess
 import app.pact.util.startOfDayMs
@@ -13,13 +15,16 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.time.Instant
 import java.time.ZoneId
+import java.util.UUID
 
 /**
- * Posts today's foreground time to the toolkit host over Tailscale.
+ * Posts today's foreground time to the screen-time host.
  * The cable is not involved. ActivityWatch on the phone stays local.
+ * Host, device id, and hostname come from pact.local.json at build time.
  */
 class PhoneShip(private val context: Context) {
     fun uploadToday() {
+        if (UPLOAD_URL.isBlank()) return
         val token = readToken() ?: return
         if (!hasUsageAccess(context)) {
             Log.i(TAG, "usage access is off, so nothing was uploaded")
@@ -36,9 +41,9 @@ class PhoneShip(private val context: Context) {
             }
         }
         val report = buildReport(
-            deviceId = DEVICE_ID,
+            deviceId = deviceId(),
             deviceName = deviceName(),
-            hostname = HOSTNAME,
+            hostname = hostname(),
             tz = ZoneId.systemDefault(),
             now = Instant.ofEpochMilli(now),
             spans = spans,
@@ -66,9 +71,34 @@ class PhoneShip(private val context: Context) {
         return token
     }
 
+    private fun deviceId(): String {
+        val configured = BuildConfig.SHIP_DEVICE_ID.trim()
+        if (configured.isNotEmpty()) return configured
+        val file = File(context.filesDir, "ship/device-id")
+        if (file.isFile) {
+            val saved = file.readText().trim()
+            if (saved.length >= 8) return saved
+        }
+        val created = UUID.randomUUID().toString()
+        file.parentFile?.mkdirs()
+        file.writeText(created + "\n")
+        return created
+    }
+
+    private fun hostname(): String {
+        val configured = BuildConfig.SHIP_HOSTNAME.trim()
+        if (configured.isNotEmpty()) return configured
+        val raw = Build.DEVICE.trim().ifBlank { "phone" }
+        val cleaned = raw.lowercase().replace(Regex("[^a-z0-9._-]"), "-").trim('-').take(40)
+        return cleaned.ifBlank { "phone" }
+    }
+
     private fun deviceName(): String {
         val stored = Settings.Global.getString(context.contentResolver, "device_name")?.trim().orEmpty()
-        return stored.ifBlank { "Nothing Phone (2)" }
+        if (stored.isNotEmpty()) return stored
+        val model = Build.MODEL?.trim().orEmpty()
+        if (model.isNotEmpty() && !model.equals("Android", ignoreCase = true)) return model
+        return "Phone"
     }
 
     private fun applicationLabel(packages: PackageManager, packageName: String): String {
@@ -104,9 +134,7 @@ class PhoneShip(private val context: Context) {
 
     companion object {
         private const val TAG = "PactShip"
-        const val DEVICE_ID = "11111111-1111-4111-8111-111111111111"
-        private const val HOSTNAME = "phone"
-        const val UPLOAD_URL = "http://pact.example:8765/activity"
+        private const val UPLOAD_URL = BuildConfig.SHIP_UPLOAD_URL
 
         @Volatile
         private var missingTokenLogged = false

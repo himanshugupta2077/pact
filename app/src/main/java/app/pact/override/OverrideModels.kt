@@ -77,7 +77,7 @@ class OverrideException(
 
 fun recordKey(kind: RequestKind, targetId: String): String = "${kind.wire}:$targetId"
 
-const val DEFAULT_PACT_SERVER = "https://pact.example"
+val DEFAULT_PACT_SERVER: String = app.pact.BuildConfig.DEFAULT_SERVER
 const val MAX_OVERRIDE_MINUTES = 15
 const val SETTINGS_TARGET = "settings"
 const val SETTINGS_PACKAGE = "pact.settings"

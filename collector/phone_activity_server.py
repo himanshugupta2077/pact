@@ -27,8 +27,29 @@ PORT = int(os.environ.get("PACT_PHONE_PORT", "8765"))
 MAX_BYTES = 2_000_000
 DEVICE_RE = re.compile(r"^[A-Za-z0-9._:-]{8,80}$")
 DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-# Same id ActivityWatch uses for this Nothing Phone, so the menu bar keeps one row.
-ALLOWED_DEVICES = frozenset({"11111111-1111-4111-8111-111111111111"})
+_UNSET = object()
+
+
+def allowed_device_ids() -> frozenset[str] | None:
+    """None means any well-formed device id. A file or env list restricts it.
+
+    The installer writes allowed-devices from pact.local.json. This module does
+    not read that json, so a copy on the host stays free of the repo layout.
+    """
+    raw = os.environ.get("PACT_ALLOWED_DEVICES", "").strip()
+    if raw == "*":
+        return None
+    if raw:
+        return frozenset(part.strip() for part in raw.split(",") if part.strip())
+    path = Path(os.environ.get("PACT_ALLOWED_DEVICES_FILE", str(ROOT.parent / "allowed-devices")))
+    if not path.is_file():
+        return None
+    found = [
+        line.strip()
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+    return frozenset(found) if found else None
 
 
 class Rejected(Exception):
@@ -57,7 +78,7 @@ def tailscale_ipv4() -> str:
     return ip[0]
 
 
-def accept_payload(token: str, authorization: str, raw: bytes) -> dict:
+def accept_payload(token: str, authorization: str, raw: bytes, allowed=_UNSET) -> dict:
     expected = "Bearer " + token
     if not hmac.compare_digest(authorization or "", expected):
         raise Rejected(401, "unauthorized")
@@ -71,7 +92,8 @@ def accept_payload(token: str, authorization: str, raw: bytes) -> dict:
         raise Rejected(400, "body is not an object")
     device = str(data.get("device_id") or "")
     day = str(data.get("day") or "")
-    if not DEVICE_RE.match(device) or device not in ALLOWED_DEVICES:
+    allowlist = allowed_device_ids() if allowed is _UNSET else allowed
+    if not DEVICE_RE.match(device) or (allowlist is not None and device not in allowlist):
         raise Rejected(403, "unknown device")
     if not DAY_RE.match(day):
         raise Rejected(400, "bad day")

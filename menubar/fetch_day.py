@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Read one Pact screen-time day from disk and print a compact JSON summary.
 
-The menu bar app runs this on the toolkit VPS over SSH. It only reads
-/var/lib/pact/activity. It does not create or change files, and the
-JSON has no window titles or URLs.
+The menu bar app runs this on the screen-time host over SSH. It only reads
+the activity directory (PACT_ACTIVITY_ROOT, default /var/lib/pact/activity).
+It does not create or change files, and the JSON has no window titles or URLs.
 
-PACT_ACTIVITY_DAY selects one Asia/Kolkata day. PACT_ACTIVITY_WEEK=1 prints
-every day in the Monday–Sunday week that contains that day.
+PACT_ACTIVITY_DAY selects one day in that file's own zone. PACT_ACTIVITY_WEEK=1
+prints every day in the Monday–Sunday week that contains that day.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 DEFAULT_ROOT = "/var/lib/pact/activity"
-DEFAULT_TZ = "Asia/Kolkata"
+DEFAULT_TZ = os.environ.get("PACT_TZ", "UTC")
 
 
 def valid_day(day: str) -> bool:

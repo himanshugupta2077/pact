@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Install the Tailscale receiver that Pact on the phone posts to.
 
-The toolkit service is not restarted. This writes under /var/lib/pact,
-which the toolkit user already owns, and leaves a process listening on the
-Tailscale address only.
+The host's main app service is not restarted. Files go under the remote
+directory from pact.local.json (default /var/lib/pact). The process listens
+on the Tailscale address only.
 
 The bearer token stays in ~/.config/pact-aw/phone-upload-token (mode 0600).
 Pass --adb to copy it into a debug Pact install on a USB phone.
@@ -14,16 +14,22 @@ from __future__ import annotations
 import argparse
 import os
 import secrets
+import shlex
 import subprocess
 import sys
 from pathlib import Path
 
-SSH = os.environ.get("PACT_AW_SSH", "pact@pact-host")
-REMOTE_DIR = "/var/lib/pact"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import pact_local  # noqa: E402
+
+SSH = os.environ.get("PACT_AW_SSH") or pact_local.text("ssh", "pact@pact-host")
+REMOTE_DIR = pact_local.text("remoteDir", "/var/lib/pact")
 REMOTE_SCRIPT = f"{REMOTE_DIR}/phone_activity_server.py"
 REMOTE_TOKEN = f"{REMOTE_DIR}/phone-upload-token"
 REMOTE_LOG = f"{REMOTE_DIR}/phone-activity-server.log"
 REMOTE_PID = f"{REMOTE_DIR}/phone-activity-server.pid"
+ACTIVITY_ROOT = pact_local.text("activityRoot", f"{REMOTE_DIR}/activity")
 TOKEN_PATH = Path.home() / ".config" / "pact-aw" / "phone-upload-token"
 HERE = Path(__file__).resolve().parent
 MARKER = "pact-phone-activity"
@@ -57,6 +63,28 @@ def token() -> str:
     return value
 
 
+def launch_command() -> str:
+    # env so this works under setsid, which does not parse VAR=value prefixes.
+    return (
+        f"/usr/bin/env PACT_ACTIVITY_ROOT={shlex.quote(ACTIVITY_ROOT)} "
+        f"PACT_PHONE_TOKEN={shlex.quote(REMOTE_TOKEN)} "
+        f"/usr/bin/python3 {shlex.quote(REMOTE_SCRIPT)}"
+    )
+
+
+def install_allowlist() -> None:
+    ids = pact_local.strings("allowedDeviceIds")
+    path = f"{REMOTE_DIR}/allowed-devices"
+    if not ids:
+        ssh(f"rm -f {shlex.quote(path)}")
+        return
+    body = ("\n".join(ids) + "\n").encode()
+    require(
+        ssh(f"cat > {shlex.quote(path)}.tmp && mv {shlex.quote(path)}.tmp {shlex.quote(path)} && chmod 600 {shlex.quote(path)}", body),
+        "upload allowlist",
+    )
+
+
 def install_remote(value: str) -> None:
     script = (HERE / "phone_activity_server.py").read_bytes()
     require(
@@ -67,11 +95,12 @@ def install_remote(value: str) -> None:
         ssh(f"cat > {REMOTE_TOKEN}.tmp && mv {REMOTE_TOKEN}.tmp {REMOTE_TOKEN} && chmod 600 {REMOTE_TOKEN}", (value + "\n").encode()),
         "upload token",
     )
+    launch = launch_command()
     cron = (
         f"# {MARKER}\n"
-        f"@reboot sleep 15 && /usr/bin/python3 {REMOTE_SCRIPT} >> {REMOTE_LOG} 2>&1\n"
-        f"*/5 * * * * /usr/bin/pgrep -f '^/usr/bin/python3 {REMOTE_SCRIPT}$' >/dev/null "
-        f"|| /usr/bin/python3 {REMOTE_SCRIPT} >> {REMOTE_LOG} 2>&1\n"
+        f"@reboot sleep 15 && {launch} >> {REMOTE_LOG} 2>&1\n"
+        f"*/5 * * * * /usr/bin/pgrep -f '[p]hone_activity_server.py' >/dev/null "
+        f"|| {launch} >> {REMOTE_LOG} 2>&1\n"
     )
     # Keep the existing backup job. Drop only a previous copy of this receiver.
     remote = r"""
@@ -90,9 +119,10 @@ if proc.returncode != 0:
     raise SystemExit(proc.stderr.strip() or "crontab failed")
 """
     require(ssh("python3 -", remote.encode()), "crontab")
+    install_allowlist()
     start = (
         f"if [ -f {REMOTE_PID} ]; then kill $(cat {REMOTE_PID}) 2>/dev/null || true; sleep 0.4; fi; "
-        f"setsid /usr/bin/python3 {REMOTE_SCRIPT} >> {REMOTE_LOG} 2>&1 < /dev/null & "
+        f"setsid {launch_command()} >> {REMOTE_LOG} 2>&1 < /dev/null & "
         f"sleep 0.6; tail -n 8 {REMOTE_LOG}"
     )
     done = ssh(start)

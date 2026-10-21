@@ -271,7 +271,7 @@ final class PanelController: NSViewController, NSTextFieldDelegate {
         doneRow.addArrangedSubview(done)
 
         previewLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
-        sshField.placeholderString = "pact@pact-host"
+        sshField.placeholderString = SiteFile.fallbackSSH
         sshField.delegate = self
         sshField.bezelStyle = .roundedBezel
         sshField.font = .systemFont(ofSize: 12)
@@ -696,7 +696,7 @@ final class PanelController: NSViewController, NSTextFieldDelegate {
 
     private func renderChart(_ rollup: DayRollup?) {
         chartCaption.stringValue = [
-            "Hour by hour, Kolkata time. Colors are Work and Personal.",
+            "Hour by hour, local time. Colors are Work and Personal.",
             "The program in front of you. A browser includes every site opened in it.",
             "Each device, split into Work and Personal.",
         ][chart]

@@ -32,8 +32,8 @@ class ActivityReportTest {
     @Test
     fun reportTotalsMatchTheSpans() {
         val report = buildReport(
-            deviceId = PhoneShip.DEVICE_ID,
-            deviceName = "Nothing Phone (2)",
+            deviceId = "device-phone-1111",
+            deviceName = "Phone",
             hostname = "phone",
             tz = tz,
             now = Instant.parse("2026-09-26T04:00:00Z"),

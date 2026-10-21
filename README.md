@@ -17,20 +17,20 @@ Time spent staring at Pact’s lock overlay is not counted as app screen time, a
 
 1. Hit a limit → lock screen → **Request override**
 2. Choose minutes (max 15) and write a comment → **Send request**
-3. On her iPhone, open `/pact` (home tile **Pact**) and unlock with Face ID. First visit: **Bind this iPhone** once in Safari.
+3. On the reviewer's phone, open `/pact` (home tile **Pact**) and unlock with biometrics. First visit: bind that phone once in the browser.
 4. Approve with a custom duration, or deny
 5. The phone polls, applies a scoped unlock, and locks again when the time expires
 
 Settings and groups use the same inbox. Approving a **settings** request unlocks editing. Approving a **group** request unlocks every app in that group.
 
-Default server: `https://pact.example` (on a fresh install you can set it under the gear / setup screen; after any request it stays locked until a settings approval).
+Default server: the `server` value in gitignored `pact.local.json`, baked in at build time. With no local file, set the URL under the gear / setup screen. After any request it stays locked until a settings approval.
 
 If you are giving this APK to someone else, or standing up a reviewer on a new VPS, read **[PAIRING.md](PAIRING.md)** — a short explanation for the friend, then the exact API an AI can implement.
 
 ## Build
 
 ```bash
-cd ~/pact
+cd /path/to/pact
 ./gradlew :app:installDebug
 ```
 
@@ -41,10 +41,10 @@ Phone must be authorized over ADB.
 1. Open **Pact**
 2. Grant **Usage access**
 3. Enable the **Pact** accessibility service
-4. On her iPhone, open `https://pact.example/pact/` in Safari and tap **Bind this iPhone** (once)
-5. Request a settings change from an app, group, or setup screen, then she approves it at `/pact/`
+4. On the reviewer's phone, open `https://<your-server>/pact/` and bind that phone once
+5. Request a settings change from an app, group, or setup screen, then the reviewer approves it at `/pact/`
 6. While that window is open, set limits, windows, and groups
-7. To test override: Request override on the lock screen, then she approves at `/pact/`
+7. To test override: Request override on the lock screen, then the reviewer approves at `/pact/`
 
 Pact itself, the default launcher, Settings, phone/dialer, and the permission controller are never blocked so you can recover.
 
@@ -57,7 +57,7 @@ The phone still counts only itself. Other devices get screen time from [Activity
 `collector/aw_ship.py` reads that local data, drops the lock screen, and counts a video (YouTube, JioHotstar, Netflix, and the same kind of app) even when you are not typing. Other apps count only while the keyboard or mouse is in use. Each run replaces today's file for this Mac on the toolkit VPS and refreshes the cross-device total.
 
 ```bash
-cd ~/pact
+cd /path/to/pact
 python3 collector/aw_ship.py --dry-run
 python3 collector/aw_ship.py
 python3 collector/aw_ship.py --install   # every 5 minutes, from ~/Library/Application Support/pact-aw
@@ -65,8 +65,10 @@ python3 collector/aw_ship.py --install   # every 5 minutes, from ~/Library/Appli
 
 On the VPS:
 
-- `/var/lib/pact/activity/<device-id>/<day>.json` — this Mac, including app, window title, and URL
-- `/var/lib/pact/activity/summary/<day>.json` — sum across every device that has shipped that day
+- `<activityRoot>/<device-id>/<day>.json` — this Mac, including app, window title, and URL
+- `<activityRoot>/summary/<day>.json` — sum across every device that has shipped that day
+
+`activityRoot` defaults to `/var/lib/pact/activity`. This machine's real path is `activityRoot` in `pact.local.json`.
 
 YouTube in a browser and the YouTube or JioHotstar apps use the same category name, so a later phone or laptop collector adds to the same total. Chrome and Safari count from the window title until their ActivityWatch browser extensions are installed.
 
@@ -74,7 +76,7 @@ YouTube in a browser and the YouTube or JioHotstar apps use the same category na
 
 Pact on the phone uploads today's foreground time every 5 minutes over Tailscale. The cable is not required. Tailscale on the phone has to be connected, the same as for an override request.
 
-The file is the second device under `/var/lib/pact/activity/`, and `summary/<day>.json` adds it to the Mac. WhatsApp, Netflix, Instagram, YouTube, and YouTube Music use the same category names as the Mac.
+The file is the second device under `activityRoot`, and `summary/<day>.json` adds it to the Mac. WhatsApp, Netflix, Instagram, YouTube, and YouTube Music use the same category names as the Mac. The upload URL and device id come from `pact.local.json` when you build the app.
 
 If Tailscale is down, plug the phone in and run `python3 collector/aw_android.py` once. That reads ActivityWatch over USB. The automatic USB job is not loaded, so it does not replace the phone's own upload.
 
@@ -83,8 +85,8 @@ If Tailscale is down, plug the phone in and run `python3 collector/aw_android.py
 `menubar/` shows today's screen time for every device that has shipped a file. The menu bar is the total. Open it for the split by device, by work / entertainment / gaming / communication, and for an hour, app, or device graph. Categories can be changed there. Marks stay on this Mac. The app only reads the VPS.
 
 ```bash
-cd ~/pact/menubar
+cd /path/to/pact/menubar
 ./build.sh --install
 ```
 
-That builds `PactScreen.app`, copies it to `~/Applications`, and opens it. The day is Asia/Kolkata, same as the collectors. A work laptop shows up in the same menu once its collector ships a day file.
+That builds `PactScreen.app`, copies it to `~/Applications`, and opens it. `build.sh` also writes `~/Library/Application Support/PactScreen/site.json` from `pact.local.json` when that file exists. The day follows `timezone` there, or the Mac's zone. A work laptop shows up in the same menu once its collector ships a day file.

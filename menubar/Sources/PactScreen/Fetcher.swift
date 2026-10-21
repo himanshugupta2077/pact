@@ -41,7 +41,7 @@ enum Fetcher {
             "-o", "BatchMode=yes",
             "-o", "ConnectTimeout=10",
             ssh,
-            "PACT_ACTIVITY_WEEK=1 PACT_ACTIVITY_DAY=\(day) PACT_ACTIVITY_ROOT=/var/lib/pact/activity python3 -",
+            "PACT_ACTIVITY_WEEK=1 PACT_ACTIVITY_DAY=\(day) PACT_ACTIVITY_ROOT=\(SiteFile.activityRoot) python3 -",
         ]
         let stdout = Pipe()
         let stderr = Pipe()

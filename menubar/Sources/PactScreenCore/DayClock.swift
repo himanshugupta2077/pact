@@ -1,8 +1,8 @@
 import Foundation
 
-/// Screen-time days match the collectors: midnight to midnight in Asia/Kolkata.
+/// Screen-time days match the collectors. The zone is site.json when set, otherwise this Mac's zone.
 public enum DayClock {
-    public static let timeZone = TimeZone(identifier: "Asia/Kolkata")!
+    public static let timeZone: TimeZone = SiteFile.load().timeZone ?? .current
 
     public static var calendar: Calendar {
         var calendar = Calendar(identifier: .gregorian)
@@ -54,7 +54,7 @@ public enum DayClock {
         return value
     }
 
-    /// Monday through Sunday, in Asia/Kolkata, for the week that contains `day`.
+    /// Monday through Sunday, in `timeZone`, for the week that contains `day`.
     public static func weekDays(containing day: String) -> [String] {
         guard let date = date(from: day) else { return day.isEmpty ? [] : [day] }
         let weekday = calendar.component(.weekday, from: date)

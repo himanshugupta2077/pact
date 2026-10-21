@@ -1,0 +1,11 @@
+{
+  "server": "https://pact.example",
+  "uploadUrl": "http://pact.example:8765/activity",
+  "phoneDeviceId": "",
+  "phoneHostname": "",
+  "ssh": "pact@pact-host",
+  "activityRoot": "/var/lib/pact/activity",
+  "remoteDir": "/var/lib/pact",
+  "timezone": "",
+  "allowedDeviceIds": []
+}

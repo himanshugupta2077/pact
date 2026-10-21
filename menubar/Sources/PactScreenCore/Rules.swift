@@ -121,7 +121,7 @@ public struct Preferences: Codable, Equatable, Sendable {
         showDevices: false,
         deviceLabels: [:],
         openAtLogin: true,
-        ssh: "pact@pact-host"
+        ssh: SiteFile.fallbackSSH
     )
 
     public init(from decoder: Decoder) throws {
@@ -138,8 +138,8 @@ public struct Preferences: Codable, Equatable, Sendable {
         showDevices = try container.decodeIfPresent(Bool.self, forKey: .showDevices) ?? false
         deviceLabels = try container.decodeIfPresent([String: String].self, forKey: .deviceLabels) ?? [:]
         openAtLogin = try container.decodeIfPresent(Bool.self, forKey: .openAtLogin) ?? true
-        let host = try container.decodeIfPresent(String.self, forKey: .ssh) ?? "pact@pact-host"
-        ssh = SSHTarget.isValid(host) ? host : "pact@pact-host"
+        let host = try container.decodeIfPresent(String.self, forKey: .ssh) ?? SiteFile.fallbackSSH
+        ssh = SSHTarget.isValid(host) ? host : SiteFile.fallbackSSH
     }
 
     private enum CodingKeys: String, CodingKey {

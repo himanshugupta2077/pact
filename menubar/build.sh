@@ -2,6 +2,24 @@
 # Build PactScreen.app. Pass --install to copy it into ~/Applications and open it.
 set -euo pipefail
 cd "$(dirname "$0")"
+python3 - <<'PY'
+import json
+from pathlib import Path
+source = Path("..") / "pact.local.json"
+if not source.is_file():
+    raise SystemExit(0)
+data = json.loads(source.read_text(encoding="utf-8"))
+site = {
+    "ssh": (data.get("ssh") or "").strip(),
+    "activityRoot": (data.get("activityRoot") or "").strip(),
+    "timezone": (data.get("timezone") or "").strip(),
+}
+dest = Path.home() / "Library" / "Application Support" / "PactScreen"
+dest.mkdir(parents=True, exist_ok=True)
+path = dest / "site.json"
+path.write_text(json.dumps(site, indent=2) + "\n", encoding="utf-8")
+path.chmod(0o600)
+PY
 swift build -c release
 bin="$(swift build -c release --show-bin-path)"
 rm -rf PactScreen.app

@@ -28,6 +28,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import aw_usage  # noqa: E402
+import pact_local  # noqa: E402
 
 DEFAULT_AW = "http://127.0.0.1:5600"
 DEFAULT_SSH = "pact@pact-host"
@@ -114,14 +115,25 @@ sys.stdout.write(json.dumps(summary) + "\n")
 """
 
 
+def configured_ssh() -> str:
+    return os.environ.get("PACT_AW_SSH") or pact_local.text("ssh", DEFAULT_SSH)
+
+
+def configured_root() -> str:
+    return pact_local.text("activityRoot", REMOTE_ROOT)
+
+
 def local_tz_name() -> str:
+    configured = pact_local.text("timezone")
+    if configured:
+        return configured
     link = os.path.realpath("/etc/localtime")
     marker = "zoneinfo/"
     if marker in link:
         name = link.split(marker, 1)[1]
         if name:
             return name
-    return "Asia/Kolkata"
+    return "UTC"
 
 
 def computer_name() -> str:
@@ -286,6 +298,13 @@ def gather(
     )
 
 
+def summary_command(day: str) -> str:
+    return (
+        f"PACT_ACTIVITY_DAY={shlex.quote(day)} "
+        f"PACT_ACTIVITY_ROOT={shlex.quote(configured_root())} python3 -"
+    )
+
+
 def upload_command(device_id: str, day: str, root: str = REMOTE_ROOT) -> str:
     if not aw_usage.DEVICE_RE.match(device_id) or not aw_usage.DAY_RE.match(day):
         raise ValueError("refusing to build a remote path from an unsafe id")
@@ -320,11 +339,11 @@ def ship(report: dict, ssh_target: str) -> dict:
     device_id = report["device_id"]
     day = report["day"]
     blob = (json.dumps(report, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
-    uploaded = ssh_run(ssh_target, upload_command(device_id, day), blob)
+    uploaded = ssh_run(ssh_target, upload_command(device_id, day, configured_root()), blob)
     if uploaded.returncode != 0:
         err = uploaded.stderr.decode("utf-8", "replace").strip()
         raise SystemExit(f"ssh upload failed: {err or uploaded.returncode}")
-    remote = f"PACT_ACTIVITY_DAY={shlex.quote(day)} python3 -"
+    remote = summary_command(day)
     summarized = ssh_run(ssh_target, remote, SUMMARY_SCRIPT.encode("utf-8"))
     if summarized.returncode != 0:
         err = summarized.stderr.decode("utf-8", "replace").strip()
@@ -366,7 +385,7 @@ def print_report(report: dict, summary: dict | None, json_mode: bool) -> None:
             file=out,
         )
         print(
-            f"stored  {REMOTE_ROOT}/{report['device_id']}/{report['day']}.json",
+            f"stored  {configured_root()}/{report['device_id']}/{report['day']}.json",
             file=out,
         )
 
@@ -379,6 +398,7 @@ def install_agent() -> None:
     dest.mkdir(parents=True, exist_ok=True)
     for name in ("aw_ship.py", "aw_usage.py"):
         (dest / name).write_text((src / name).read_text(encoding="utf-8"), encoding="utf-8")
+    pact_local.install_beside(dest)
     script = dest / "aw_ship.py"
     plist_path = Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
     log_path = Path.home() / "Library" / "Logs" / "pact-aw-ship.log"
@@ -431,7 +451,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Ship ActivityWatch screen time to the toolkit VPS")
     parser.add_argument("--day", help="Local day YYYY-MM-DD (default: today)")
     parser.add_argument("--aw-url", default=os.environ.get("AW_URL", DEFAULT_AW))
-    parser.add_argument("--ssh", default=os.environ.get("PACT_AW_SSH", DEFAULT_SSH))
+    parser.add_argument("--ssh", default=configured_ssh())
     parser.add_argument("--dry-run", action="store_true", help="Print the report and do not upload")
     parser.add_argument("--json", action="store_true", help="Print the full report as JSON")
     parser.add_argument("--summary-only", action="store_true", help="Print the VPS total for --day and do not gather")
@@ -442,8 +462,7 @@ def main(argv: list[str] | None = None) -> int:
         day = args.day or datetime.now(ZoneInfo(local_tz_name())).date().isoformat()
         if not aw_usage.DAY_RE.match(day):
             raise SystemExit(f"bad day {day!r}")
-        remote = f"PACT_ACTIVITY_DAY={shlex.quote(day)} python3 -"
-        done = ssh_run(args.ssh, remote, SUMMARY_SCRIPT.encode("utf-8"))
+        done = ssh_run(args.ssh, summary_command(day), SUMMARY_SCRIPT.encode("utf-8"))
         if done.returncode != 0:
             err = done.stderr.decode("utf-8", "replace").strip()
             raise SystemExit(f"ssh summary failed: {err or done.returncode}")

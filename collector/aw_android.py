@@ -225,7 +225,7 @@ def gather_phone(serial: str, day: str | None):
         detail = (forwarded.stderr or forwarded.stdout).strip()
         raise SystemExit(f"adb forward failed: {detail}")
     token = resolve_token(serial)
-    tz_name = phone_prop(serial, "persist.sys.timezone") or "Asia/Kolkata"
+    tz_name = phone_prop(serial, "persist.sys.timezone") or aw_ship.local_tz_name()
     device_name = phone_setting(serial, "device_name") or "Android"
     return aw_ship.gather(
         f"http://127.0.0.1:{LOCAL_PORT}",
@@ -243,6 +243,7 @@ def install_agent() -> None:
     dest.mkdir(parents=True, exist_ok=True)
     for name in ("aw_android.py", "aw_ship.py", "aw_usage.py"):
         (dest / name).write_text((src / name).read_text(encoding="utf-8"), encoding="utf-8")
+    aw_ship.pact_local.install_beside(dest)
     script = dest / "aw_android.py"
     plist_path = Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
     log_path = Path.home() / "Library" / "Logs" / "pact-aw-ship-android.log"
@@ -294,7 +295,7 @@ def install_agent() -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Ship Android ActivityWatch screen time to the toolkit VPS")
     parser.add_argument("--day", help="Phone-local day YYYY-MM-DD (default: today)")
-    parser.add_argument("--ssh", default=os.environ.get("PACT_AW_SSH", aw_ship.DEFAULT_SSH))
+    parser.add_argument("--ssh", default=aw_ship.configured_ssh())
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--install", action="store_true")

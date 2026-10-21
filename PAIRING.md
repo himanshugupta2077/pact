@@ -158,7 +158,7 @@ Server must:
 - Assign `id` (16 hex chars is fine), `status=pending`, `day=YYYY-MM-DD` in the server timezone, `created_at` ISO-8601, `created_at_ms` epoch millis
 - `expires_at` / `expires_at_ms` stay empty until approve
 
-Timezone: use one explicit zone (reference uses `Asia/Kolkata` via `PACT_TZ`). Midnight expiry and “once per day” are in that zone, not UTC.
+Timezone: use one explicit zone via `PACT_TZ`. Midnight expiry and “once per day” are in that zone, not UTC.
 
 ### `GET /api/pact/requests/{id}` — phone, no session
 

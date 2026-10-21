@@ -13,7 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import phone_activity_server as server
 
 TOKEN = "a" * 24
-DEVICE = "11111111-1111-4111-8111-111111111111"
+DEVICE = "device-phone-1111"
+ALLOWED = frozenset({DEVICE})
 
 
 def payload(**extra) -> bytes:
@@ -30,19 +31,24 @@ def payload(**extra) -> bytes:
 
 class AcceptTests(unittest.TestCase):
     def test_accepts_this_phone(self):
-        data = server.accept_payload(TOKEN, "Bearer " + TOKEN, payload())
+        data = server.accept_payload(TOKEN, "Bearer " + TOKEN, payload(), ALLOWED)
         self.assertEqual(data["device_id"], DEVICE)
 
     def test_rejects_a_bad_token(self):
         with self.assertRaises(server.Rejected) as caught:
-            server.accept_payload(TOKEN, "Bearer no", payload())
+            server.accept_payload(TOKEN, "Bearer no", payload(), ALLOWED)
         self.assertEqual(caught.exception.status, 401)
 
-    def test_rejects_the_mac_device_id(self):
-        raw = payload(device_id="22222222-2222-4222-8222-222222222222")
+    def test_rejects_a_device_off_the_allowlist(self):
+        raw = payload(device_id="device-other-2222")
         with self.assertRaises(server.Rejected) as caught:
-            server.accept_payload(TOKEN, "Bearer " + TOKEN, raw)
+            server.accept_payload(TOKEN, "Bearer " + TOKEN, raw, ALLOWED)
         self.assertEqual(caught.exception.status, 403)
+
+    def test_allows_any_well_formed_device_when_unrestricted(self):
+        raw = payload(device_id="device-other-2222")
+        data = server.accept_payload(TOKEN, "Bearer " + TOKEN, raw, None)
+        self.assertEqual(data["device_id"], "device-other-2222")
 
     def test_rejects_more_than_a_day(self):
         with self.assertRaises(server.Rejected):
