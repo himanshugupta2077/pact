@@ -20,3 +20,6 @@ pact.local.json
 pact.local.md
 __pycache__/
 *.pyc
+
+# Swift build cache at the project root
+/.build/
