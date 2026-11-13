@@ -30,9 +30,19 @@ class PhoneShip(private val context: Context) {
             Log.i(TAG, "usage access is off, so nothing was uploaded")
             return
         }
-        val app = context.applicationContext as PactApp
         val now = System.currentTimeMillis()
-        val spans = app.usage.foregroundSpans(startOfDayMs(now), now)
+        val today = startOfDayMs(now)
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val lastDay = prefs.getLong(KEY_LAST_DAY, today)
+        // Close out the day the last upload was for, so its final minutes are not lost.
+        if (lastDay < today) upload(token, lastDay, today)
+        upload(token, today, now)
+        prefs.edit().putLong(KEY_LAST_DAY, today).apply()
+    }
+
+    private fun upload(token: String, fromMs: Long, untilMs: Long) {
+        val app = context.applicationContext as PactApp
+        val spans = app.usage.foregroundSpans(fromMs, untilMs)
         val labels = HashMap<String, String>()
         val packages = context.packageManager
         for (span in spans) {
@@ -45,7 +55,7 @@ class PhoneShip(private val context: Context) {
             deviceName = deviceName(),
             hostname = hostname(),
             tz = ZoneId.systemDefault(),
-            now = Instant.ofEpochMilli(now),
+            now = Instant.ofEpochMilli(untilMs - 1),
             spans = spans,
             labels = labels,
         )
@@ -135,6 +145,8 @@ class PhoneShip(private val context: Context) {
     companion object {
         private const val TAG = "PactShip"
         private const val UPLOAD_URL = BuildConfig.SHIP_UPLOAD_URL
+        private const val PREFS = "pact_ship"
+        private const val KEY_LAST_DAY = "last_day"
 
         @Volatile
         private var missingTokenLogged = false

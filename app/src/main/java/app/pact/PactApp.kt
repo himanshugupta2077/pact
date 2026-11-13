@@ -1,6 +1,7 @@
 package app.pact
 
 import android.app.Application
+import app.pact.data.FocusStore
 import app.pact.data.GroupRepository
 import app.pact.data.InstalledApps
 import app.pact.data.NotificationStore
@@ -11,6 +12,7 @@ import app.pact.data.RuleRepository
 import app.pact.data.UsageRepository
 import app.pact.engine.RuleEngine
 import app.pact.enforce.MediaSilencer
+import app.pact.enforce.SecureSettings
 import android.util.Log
 import app.pact.override.OverrideClient
 import app.pact.override.OverrideStore
@@ -31,8 +33,8 @@ class PactApp : Application() {
     val overrideStore by lazy { OverrideStore(this) }
     val exclusions by lazy { OverlayExclusionStore(this) }
     val popups by lazy { PopupExclusionStore(this) }
-    val rules by lazy { RuleRepository(db.appRuleDao()) { overrideStore.canEditSettings() } }
-    val groups by lazy { GroupRepository(db.appGroupDao()) { overrideStore.canEditSettings() } }
+    val rules by lazy { RuleRepository(db.appRuleDao()) }
+    val groups by lazy { GroupRepository(db.appGroupDao()) }
     val usage by lazy {
         UsageRepository(this).also {
             it.exclusions = exclusions
@@ -43,6 +45,7 @@ class PactApp : Application() {
     val notifications by lazy { NotificationStore(this) }
     val engine by lazy { RuleEngine(this, usage, installed, exclusions, popups) }
     val media by lazy { MediaSilencer(this) }
+    val focus by lazy { FocusStore(this) }
     val overrides by lazy { OverrideSync(overrideStore, OverrideClient(overrideStore), engine) }
 
     override fun onCreate() {
@@ -72,6 +75,14 @@ class PactApp : Application() {
         }
         scope.launch {
             runCatching { overrides.runLoop() }
+        }
+        scope.launch {
+            while (isActive) {
+                if (SecureSettings.ensureAccessibility(this@PactApp)) {
+                    Log.i("Pact", "accessibility service was off; turned it back on")
+                }
+                delay(15_000)
+            }
         }
         scope.launch {
             while (isActive) {

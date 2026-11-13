@@ -23,19 +23,9 @@ class OverrideSync(
 
     fun snapshot(kind: RequestKind, targetId: String): OverrideSnapshot = store.snapshot(kind, targetId)
 
-    fun settingsSnapshot(): OverrideSnapshot = store.settingsSnapshot()
-
-    fun canEditSettings(): Boolean = store.canEditSettings()
-
-    fun canEditServerUrl(): Boolean = store.canEditServerUrl()
-
-    fun settingsRemainingMs(now: Long = System.currentTimeMillis()): Long =
-        store.settingsSnapshot(now).remainingMs(now)
-
     fun serverUrl(): String = store.serverUrl()
 
     fun setServerUrl(url: String) {
-        if (!store.canEditServerUrl()) return
         store.setServerUrl(url)
     }
 
@@ -45,9 +35,6 @@ class OverrideSync(
         minutes: Int,
         comment: String,
     ): OverrideSnapshot = submit(RequestKind.APP, packageName, appLabel, minutes, comment)
-
-    suspend fun submitSettings(minutes: Int, comment: String): OverrideSnapshot =
-        submit(RequestKind.SETTINGS, SETTINGS_TARGET, "Pact settings", minutes, comment)
 
     suspend fun submitGroup(
         groupId: String,
@@ -140,7 +127,6 @@ class OverrideSync(
         engine.replaceGrants(
             apps = store.activeUntil(RequestKind.APP),
             groups = store.activeUntil(RequestKind.GROUP),
-            settingsUntilMs = store.settingsUntil(),
         )
     }
 }

@@ -88,17 +88,12 @@ class OverlayExclusionStore(context: Context) {
         persistDaysLocked()
     }
 
+    /**
+     * A cover left open by a dead process is dropped, not credited: once the process died the
+     * overlay was gone, so the time since then may have been real use.
+     */
     private fun recoverCoveringLocked() {
-        val pkg = prefs.getString(KEY_COVER_PKG, null)?.takeIf { it.isNotBlank() } ?: return
-        val sinceWall = prefs.getLong(KEY_COVER_WALL, 0L)
         prefs.edit().remove(KEY_COVER_PKG).remove(KEY_COVER_WALL).apply()
-        if (sinceWall <= 0L) return
-        val add = (System.currentTimeMillis() - sinceWall).coerceIn(0L, 6L * 60L * 60L * 1000L)
-        if (add <= 0L) return
-        val day = startOfDayMs()
-        val row = byDay.getOrPut(day) { HashMap() }
-        row[pkg] = (row[pkg] ?: 0L) + add
-        persistDaysLocked()
     }
 
     private fun rolloverLocked() {

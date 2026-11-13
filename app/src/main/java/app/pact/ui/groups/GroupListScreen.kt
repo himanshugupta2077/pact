@@ -42,9 +42,6 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.pact.PactApp
 import app.pact.data.WindowMode
-import app.pact.override.OverridePhase
-import app.pact.override.OverrideSnapshot
-import app.pact.ui.common.ApprovalCard
 import app.pact.ui.common.AppIcon
 import app.pact.ui.common.QuotaBar
 import app.pact.ui.theme.Paper
@@ -74,15 +71,12 @@ data class GroupRow(
 
 data class GroupListState(
     val groups: List<GroupRow> = emptyList(),
-    val settings: OverrideSnapshot = OverrideSnapshot(OverridePhase.AVAILABLE),
-    val canEdit: Boolean = false,
 )
 
 class GroupListViewModel(private val app: PactApp) : ViewModel() {
     private val tick = MutableStateFlow(0L)
 
-    val state = combine(app.groups.observeAll(), app.overrides.records, tick) { stored, _, _ ->
-        val settings = app.overrides.settingsSnapshot()
+    val state = combine(app.groups.observeAll(), tick) { stored, _ ->
         GroupListState(
             groups = stored.map { item ->
                 val rule = item.toRule()
@@ -100,8 +94,6 @@ class GroupListViewModel(private val app: PactApp) : ViewModel() {
                     windowEndMinutes = rule.windowEndMinutes,
                 )
             },
-            settings = settings,
-            canEdit = settings.phase == OverridePhase.ACTIVE,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GroupListState())
 
@@ -116,10 +108,6 @@ class GroupListViewModel(private val app: PactApp) : ViewModel() {
 
     fun reload() {
         tick.value = System.currentTimeMillis()
-    }
-
-    suspend fun requestSettings(minutes: Int, comment: String) {
-        app.overrides.submitSettings(minutes, comment)
     }
 
     companion object {
@@ -172,17 +160,6 @@ fun GroupListScreen(
             modifier = Modifier.weight(1f),
             contentPadding = PaddingValues(bottom = 16.dp),
         ) {
-            item(key = "lock") {
-                ApprovalCard(
-                    snapshot = state.settings,
-                    modifier = Modifier.padding(horizontal = 20.dp),
-                    title = "Settings lock",
-                    body = "New groups and edits need approval first.",
-                    requestLabel = "Request to change settings",
-                    oncePerDayHint = "Once a day. After approval you can edit for that many minutes.",
-                    onSubmit = vm::requestSettings,
-                )
-            }
             if (groups.isEmpty()) {
                 item(key = "empty") {
                     Text(
@@ -201,7 +178,6 @@ fun GroupListScreen(
 
         Button(
             onClick = onNewGroup,
-            enabled = state.canEdit,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp, vertical = 12.dp)

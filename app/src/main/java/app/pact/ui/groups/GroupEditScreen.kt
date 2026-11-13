@@ -74,6 +74,7 @@ import app.pact.ui.theme.Paper
 import app.pact.ui.theme.Rust
 import app.pact.ui.theme.pactFieldColors
 import app.pact.util.formatDuration
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -81,6 +82,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class PickerApp(
     val packageName: String,
@@ -101,12 +103,10 @@ data class GroupEditState(
     val missing: Boolean = false,
     val usedMs: Long = 0L,
     val canSave: Boolean = false,
-    val canEdit: Boolean = false,
     val windowMode: WindowMode = WindowMode.NONE,
     val windowStartMinutes: Int = DEFAULT_WINDOW_START,
     val windowEndMinutes: Int = DEFAULT_WINDOW_END,
     val savedWindow: Boolean = false,
-    val settings: OverrideSnapshot = OverrideSnapshot(OverridePhase.AVAILABLE),
     val groupAccess: OverrideSnapshot = OverrideSnapshot(OverridePhase.AVAILABLE),
     val groupBlocked: Boolean = false,
 )
@@ -170,8 +170,6 @@ class GroupEditViewModel(
             .toList()
         val limit = form.minutes.toIntOrNull() ?: 0
         val hasWindow = window.mode != WindowMode.NONE && window.start != window.end
-        val settings = app.overrides.settingsSnapshot()
-        val canEdit = settings.phase == OverridePhase.ACTIVE
         val groupAccess = if (groupId != null) {
             app.overrides.snapshot(RequestKind.GROUP, groupId)
         } else {
@@ -188,16 +186,13 @@ class GroupEditViewModel(
             apps = rows,
             missing = groupId != null && catalog.ready && catalog.gone,
             usedMs = if (groupId != null) app.engine.groupUsedMs(groupId) else 0L,
-            canSave = canEdit &&
-                form.name.trim().isNotEmpty() &&
+            canSave = form.name.trim().isNotEmpty() &&
                 form.selected.isNotEmpty() &&
                 (limit > 0 || hasWindow || groupId != null),
-            canEdit = canEdit,
             windowMode = window.mode,
             windowStartMinutes = window.start,
             windowEndMinutes = window.end,
             savedWindow = window.saved,
-            settings = settings,
             groupAccess = groupAccess,
             groupBlocked = groupBlocked,
         )
@@ -223,7 +218,7 @@ class GroupEditViewModel(
                 }
             }
             val extras = app.groups.getAll().flatMap { it.packageNames } + selected.value
-            installed.value = app.installed.userApps(extras)
+            installed.value = withContext(Dispatchers.IO) { app.installed.userApps(extras) }
             loaded.value = true
         }
         viewModelScope.launch {
@@ -264,7 +259,6 @@ class GroupEditViewModel(
     }
 
     fun toggle(packageName: String) {
-        if (!app.overrides.canEditSettings()) return
         val next = selected.value.toMutableSet()
         if (!next.add(packageName)) next.remove(packageName)
         selected.value = next
@@ -274,7 +268,7 @@ class GroupEditViewModel(
         val current = state.value
         if (!current.canSave) return
         viewModelScope.launch {
-            val id = app.groups.save(
+            app.groups.save(
                 id = groupId,
                 name = current.name,
                 dailyLimitMinutes = current.minutesText.toIntOrNull() ?: 0,
@@ -283,19 +277,16 @@ class GroupEditViewModel(
                 windowStartMinutes = current.windowStartMinutes,
                 windowEndMinutes = current.windowEndMinutes,
             )
-            if (id != null) onDone()
+            onDone()
         }
     }
 
     fun delete(onDone: () -> Unit) {
         val id = groupId ?: return
         viewModelScope.launch {
-            if (app.groups.delete(id)) onDone()
+            app.groups.delete(id)
+            onDone()
         }
-    }
-
-    suspend fun requestSettings(minutes: Int, comment: String) {
-        app.overrides.submitSettings(minutes, comment)
     }
 
     suspend fun requestGroupAccess(minutes: Int, comment: String) {
@@ -353,7 +344,6 @@ fun GroupEditScreen(
     val scheme = MaterialTheme.colorScheme
     val context = LocalContext.current
     val presets = listOf(15, 30, 45, 60, 90)
-    val editable = state.canEdit
 
     LaunchedEffect(state.missing) {
         if (state.missing) onBack()
@@ -385,17 +375,6 @@ fun GroupEditScreen(
             modifier = Modifier.weight(1f),
             contentPadding = PaddingValues(bottom = 16.dp),
         ) {
-            item(key = "lock") {
-                ApprovalCard(
-                    snapshot = state.settings,
-                    modifier = Modifier.padding(horizontal = 24.dp),
-                    title = "Settings lock",
-                    body = "Creating or changing a group needs approval. After that you can edit for the granted time.",
-                    requestLabel = "Request to change settings",
-                    oncePerDayHint = "Once a day. After approval you can edit for that many minutes.",
-                    onSubmit = vm::requestSettings,
-                )
-            }
             if (groupId != null && (state.groupBlocked || state.groupAccess.phase != OverridePhase.AVAILABLE)) {
                 item(key = "group-access") {
                     ApprovalCard(
@@ -414,7 +393,6 @@ fun GroupEditScreen(
                     value = state.name,
                     onValueChange = vm::onName,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
-                    enabled = editable,
                     label = { Text("Name") },
                     placeholder = { Text("e.g. Social media") },
                     singleLine = true,
@@ -451,7 +429,7 @@ fun GroupEditScreen(
                         )
                     }
                     state.members.forEach { row ->
-                        PickerRow(row, enabled = editable, onToggle = { vm.toggle(row.packageName) })
+                        PickerRow(row, onToggle = { vm.toggle(row.packageName) })
                     }
                 }
                 Text(
@@ -464,7 +442,6 @@ fun GroupEditScreen(
                     value = state.minutesText,
                     onValueChange = vm::onMinutes,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
-                    enabled = editable,
                     label = { Text("Minutes per day") },
                     placeholder = { Text("e.g. 30") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -482,7 +459,6 @@ fun GroupEditScreen(
                         PresetChip(
                             label = "${preset}m",
                             selected = selected,
-                            enabled = editable,
                         ) { vm.onMinutes(preset.toString()) }
                     }
                 }
@@ -491,7 +467,6 @@ fun GroupEditScreen(
                     startMinutes = state.windowStartMinutes,
                     endMinutes = state.windowEndMinutes,
                     saved = state.savedWindow,
-                    enabled = editable,
                     subject = "This group",
                     onMode = vm::onWindowMode,
                     onPickStart = {
@@ -532,7 +507,7 @@ fun GroupEditScreen(
                 )
             }
             items(state.apps, key = { it.packageName }) { row ->
-                PickerRow(row, enabled = editable, onToggle = { vm.toggle(row.packageName) })
+                PickerRow(row, onToggle = { vm.toggle(row.packageName) })
             }
             if (state.apps.isEmpty()) {
                 item(key = "no-apps") {
@@ -565,7 +540,7 @@ fun GroupEditScreen(
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier
                     .align(Alignment.CenterHorizontally)
-                    .clickable(enabled = editable) { confirmDelete = true }
+                    .clickable { confirmDelete = true }
                     .padding(12.dp),
             )
         } else {
@@ -599,12 +574,12 @@ fun GroupEditScreen(
 }
 
 @Composable
-private fun PickerRow(row: PickerApp, enabled: Boolean, onToggle: () -> Unit) {
+private fun PickerRow(row: PickerApp, onToggle: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = enabled, onClick = onToggle)
+            .clickable(onClick = onToggle)
             .padding(horizontal = 20.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

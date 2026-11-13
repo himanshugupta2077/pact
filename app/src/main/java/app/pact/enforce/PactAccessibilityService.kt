@@ -1,11 +1,13 @@
 package app.pact.enforce
 
 import android.accessibilityservice.AccessibilityService
+import android.app.KeyguardManager
 import android.content.res.Configuration
 import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityWindowInfo
@@ -16,11 +18,14 @@ class PactAccessibilityService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var overlay: BlockOverlay
     private lateinit var media: MediaSilencer
+    private lateinit var sites: SiteBlocker
 
     private var covering: String? = null
+    private var coverUsage: String? = null
     private var lastEnforceUptime = 0L
     private var lastSilenceUptime = 0L
     private var hideScheduled = false
+    private var colorPackage: String? = null
 
     private val tick = object : Runnable {
         override fun run() {
@@ -43,6 +48,7 @@ class PactAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         overlay = BlockOverlay(this) { goHome() }
         media = (application as? PactApp)?.media ?: MediaSilencer(this)
+        sites = SiteBlocker(this)
         handler.removeCallbacks(tick)
         handler.post(tick)
     }
@@ -82,9 +88,21 @@ class PactAccessibilityService : AccessibilityService() {
         val app = application as? PactApp ?: return
         if (!::overlay.isInitialized) return
 
+        // The screen is off or locked: no screen time to exclude, so stop the cover clock.
+        val power = getSystemService(PowerManager::class.java)
+        if (power?.isInteractive == false) {
+            app.engine.setCovering(null)
+            return
+        }
+        val top = topUserPackage()
+        updateGrayscale(app, top)
+        if (getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true) {
+            app.engine.setCovering(null)
+            return
+        }
+
         val popups = noteForeground(app)
 
-        val top = topUserPackage()
         val blockedHit = when {
             top != null && app.engine.shouldBlock(top) -> top
             else -> blockedPipPackage(app)
@@ -95,8 +113,8 @@ class PactAccessibilityService : AccessibilityService() {
             val first = covering != blockedHit
             covering = blockedHit
             // Pop-up time is already omitted. Covering it as well would subtract twice.
-            val coverForUsage = if (popups != null && blockedHit in popups) null else blockedHit
-            app.engine.setCovering(coverForUsage)
+            coverUsage = if (popups != null && blockedHit in popups) null else blockedHit
+            app.engine.setCovering(coverUsage)
             overlay.show(blockedHit)
             if (first) {
                 lastSilenceUptime = 0L
@@ -106,6 +124,8 @@ class PactAccessibilityService : AccessibilityService() {
             }
             return
         }
+
+        if (covering == null) sites.enforce(top, app.focus)
 
         val held = covering
         if (held != null) {
@@ -127,6 +147,7 @@ class PactAccessibilityService : AccessibilityService() {
             }
             if (packageWindowVisible(held) || top == null || isTransientPackage(top ?: "")) {
                 cancelHide()
+                app.engine.setCovering(coverUsage)
                 overlay.show(held)
                 silenceIfDue(app, visible = true)
                 return
@@ -138,6 +159,14 @@ class PactAccessibilityService : AccessibilityService() {
         if (overlay.shownPackage != null) overlay.hide()
         app.engine.setCovering(null)
         silenceIfDue(app, visible = false)
+    }
+
+    /** Black and white unless a call is on or the last real app is kept in color. */
+    private fun updateGrayscale(app: PactApp, top: String?) {
+        if (!app.focus.grayscale.value) return
+        if (top != null && top != packageName) colorPackage = top
+        val color = SecureSettings.inCall(this) || colorPackage in app.focus.colorApps.value
+        SecureSettings.setGrayscale(this, !color)
     }
 
     private fun stillLocked(app: PactApp, pkg: String): Boolean {

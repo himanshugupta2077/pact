@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -33,7 +34,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,12 +49,12 @@ import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import app.pact.PactApp
 import app.pact.enforce.PactNotificationListener
-import app.pact.ui.common.ApprovalCard
+import app.pact.enforce.SecureSettings
+import app.pact.ui.common.SwitchRow
 import app.pact.ui.theme.Paper
 import app.pact.ui.theme.Rust
 import app.pact.ui.theme.Sage
 import app.pact.ui.theme.pactFieldColors
-import kotlinx.coroutines.delay
 
 @Composable
 fun SetupScreen(
@@ -68,16 +68,11 @@ fun SetupScreen(
     val scheme = MaterialTheme.colorScheme
     var serverUrl by remember { mutableStateOf(app.overrides.serverUrl()) }
     var serverSaved by remember { mutableStateOf(false) }
-    val records by app.overrides.records.collectAsStateWithLifecycle()
-    var now by remember { mutableStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            now = System.currentTimeMillis()
-            delay(1_000)
-        }
-    }
-    val settings = remember(records, now) { app.overrides.settingsSnapshot() }
-    val canEditServer = app.overrides.canEditServerUrl()
+    val grayscale by app.focus.grayscale.collectAsStateWithLifecycle()
+    val colorApps by app.focus.colorApps.collectAsStateWithLifecycle()
+    val sites by app.focus.blockedSites.collectAsStateWithLifecycle()
+    val canWriteSecure = remember { SecureSettings.canWrite(context) }
+    var siteDraft by remember { mutableStateOf("") }
 
     Column(
         modifier = Modifier
@@ -173,17 +168,73 @@ fun SetupScreen(
             )
         }
         Spacer(Modifier.height(28.dp))
-        ApprovalCard(
-            snapshot = settings,
-            title = "Settings lock",
-            body = "The server URL and all limits stay locked until someone approves a change.",
-            requestLabel = "Request to change settings",
-            oncePerDayHint = "Once a day. After approval you can edit for that many minutes.",
-            onSubmit = { minutes, comment ->
-                app.overrides.submitSettings(minutes, comment)
+        SwitchRow(
+            title = "Black and white",
+            body = if (canWriteSecure) {
+                val kept = colorApps.size
+                val apps = if (kept == 1) "1 app" else "$kept apps"
+                "Grey screen all the time. Color comes back during calls and in $apps " +
+                    "you keep in color (switch on each app's page)."
+            } else {
+                "Needs one permission from a computer first: ${SecureSettings.GRANT_COMMAND}"
+            },
+            checked = grayscale && canWriteSecure,
+            enabled = canWriteSecure,
+            onChange = { on ->
+                app.focus.setGrayscale(on)
+                if (!on) SecureSettings.setGrayscale(context, false)
             },
         )
-        Spacer(Modifier.height(16.dp))
+
+        Spacer(Modifier.height(28.dp))
+        Text("Blocked websites", style = MaterialTheme.typography.titleLarge, color = scheme.onBackground)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Closed in Chrome, Brave, Firefox and other common browsers. Subdomains count too, so youtube.com covers m.youtube.com.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = scheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        sites.sorted().forEach { host ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    host,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = scheme.onBackground,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { app.focus.removeSite(host) }) {
+                    Text("Remove", color = scheme.onSurfaceVariant)
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = siteDraft,
+                onValueChange = { siteDraft = it.take(100) },
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("e.g. facebook.com") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                shape = RoundedCornerShape(14.dp),
+                colors = pactFieldColors(),
+            )
+            Spacer(Modifier.width(8.dp))
+            OutlinedButton(
+                onClick = { if (app.focus.addSite(siteDraft) != null) siteDraft = "" },
+                enabled = siteDraft.isNotBlank(),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = scheme.onBackground),
+            ) {
+                Text("Add", color = scheme.onBackground)
+            }
+        }
+
+        Spacer(Modifier.height(28.dp))
         Text("Override server", style = MaterialTheme.typography.titleLarge, color = scheme.onBackground)
         Spacer(Modifier.height(8.dp))
         Text(
@@ -199,7 +250,6 @@ fun SetupScreen(
                 serverSaved = false
             },
             modifier = Modifier.fillMaxWidth(),
-            enabled = canEditServer,
             label = { Text("Server URL") },
             placeholder = { Text("https://pact.example") },
             singleLine = true,
@@ -214,7 +264,6 @@ fun SetupScreen(
                 serverUrl = app.overrides.serverUrl()
                 serverSaved = true
             },
-            enabled = canEditServer,
             modifier = Modifier.fillMaxWidth().height(48.dp),
             shape = RoundedCornerShape(12.dp),
             colors = ButtonDefaults.outlinedButtonColors(contentColor = scheme.onBackground),

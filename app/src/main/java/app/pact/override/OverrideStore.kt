@@ -127,15 +127,6 @@ class OverrideStore(context: Context) {
     fun snapshot(packageName: String, now: Long = System.currentTimeMillis()): OverrideSnapshot =
         snapshot(RequestKind.APP, packageName, now)
 
-    fun settingsSnapshot(now: Long = System.currentTimeMillis()): OverrideSnapshot =
-        snapshot(RequestKind.SETTINGS, SETTINGS_TARGET, now)
-
-    fun canEditSettings(now: Long = System.currentTimeMillis()): Boolean =
-        settingsSnapshot(now).phase == OverridePhase.ACTIVE
-
-    fun canEditServerUrl(now: Long = System.currentTimeMillis()): Boolean =
-        canEditSettings(now) || _records.value.isEmpty()
-
     fun activeUntil(kind: RequestKind, now: Long = System.currentTimeMillis()): Map<String, Long> {
         val out = LinkedHashMap<String, Long>()
         for (rec in _records.value.values) {
@@ -146,11 +137,6 @@ class OverrideStore(context: Context) {
     }
 
     fun activeUntil(): Map<String, Long> = activeUntil(RequestKind.APP)
-
-    fun settingsUntil(now: Long = System.currentTimeMillis()): Long {
-        val rec = get(RequestKind.SETTINGS, SETTINGS_TARGET) ?: return 0L
-        return if (rec.overrideUntilEpochMs > now) rec.overrideUntilEpochMs else 0L
-    }
 
     fun noteWallClock(now: Long = System.currentTimeMillis()): Boolean {
         val last = prefs.getLong(KEY_WALL, 0L)

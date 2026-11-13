@@ -12,7 +12,6 @@ import app.pact.data.WindowMode
 import app.pact.util.formatClockMinutes
 import app.pact.util.minutesOfDay
 import app.pact.util.startOfDayMs
-import java.util.concurrent.ConcurrentHashMap
 
 enum class BlockCause {
     NONE,
@@ -51,10 +50,9 @@ class RuleEngine(
     @Volatile
     private var groupGrants: Map<String, Long> = emptyMap()
 
+    // Swapped whole so a reader never sees it half-filled.
     @Volatile
-    private var settingsUntil: Long = 0L
-
-    private val usageBase = ConcurrentHashMap<String, Long>()
+    private var usageBase: Map<String, Long> = emptyMap()
 
     @Volatile
     private var popupPackages: Set<String> = emptySet()
@@ -75,11 +73,9 @@ class RuleEngine(
     fun replaceGrants(
         apps: Map<String, Long>,
         groups: Map<String, Long>,
-        settingsUntilMs: Long,
     ) {
         appGrants = apps
         groupGrants = groups
-        settingsUntil = settingsUntilMs
     }
 
     fun hasActiveOverride(packageName: String, now: Long = System.currentTimeMillis()): Boolean {
@@ -92,12 +88,6 @@ class RuleEngine(
     fun hasActiveGroupOverride(groupId: String, now: Long = System.currentTimeMillis()): Boolean {
         return (groupGrants[groupId] ?: 0L) > now
     }
-
-    fun canEditSettings(now: Long = System.currentTimeMillis()): Boolean {
-        return settingsUntil > now
-    }
-
-    fun settingsUntilMs(): Long = settingsUntil
 
     fun replaceGroups(next: List<GroupRule>) {
         val byId = next.associateBy { it.id }
@@ -153,8 +143,7 @@ class RuleEngine(
         if (!force && now - lastUsageRefreshElapsed < 1_200L) return
         lastUsageRefreshElapsed = now
         val snapshot = usageRepository.foregroundMsToday()
-        usageBase.clear()
-        usageBase.putAll(snapshot)
+        usageBase = HashMap(snapshot)
         // Stats already include the open interval up to wall-clock now.
         // Reset the in-memory extra so we don't double-count.
         fgSinceElapsed = now

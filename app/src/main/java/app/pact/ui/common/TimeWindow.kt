@@ -36,7 +36,7 @@ fun TimeWindowCard(
     startMinutes: Int,
     endMinutes: Int,
     saved: Boolean,
-    enabled: Boolean,
+    enabled: Boolean = true,
     onMode: (WindowMode) -> Unit,
     onPickStart: () -> Unit,
     onPickEnd: () -> Unit,

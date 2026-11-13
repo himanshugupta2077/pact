@@ -49,9 +49,6 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.pact.PactApp
 import app.pact.data.WindowMode
-import app.pact.override.OverridePhase
-import app.pact.override.OverrideSnapshot
-import app.pact.ui.common.ApprovalCard
 import app.pact.ui.common.AppIcon
 import app.pact.ui.common.DEFAULT_WINDOW_END
 import app.pact.ui.common.DEFAULT_WINDOW_START
@@ -59,6 +56,7 @@ import app.pact.ui.common.PresetChip
 import app.pact.ui.common.TimeWindowCard
 import app.pact.ui.common.pickTime
 import app.pact.ui.common.QuotaBar
+import app.pact.ui.common.SwitchRow
 import app.pact.ui.common.windowRuleLabel
 import app.pact.ui.theme.Paper
 import app.pact.ui.theme.Rust
@@ -88,13 +86,13 @@ data class AppDetailState(
     val groupName: String? = null,
     val groupLimitMinutes: Int = 0,
     val groupUsedMs: Long = 0L,
-    val settings: OverrideSnapshot = OverrideSnapshot(OverridePhase.AVAILABLE),
+    val keepInColor: Boolean = false,
 ) {
     val hasWindow: Boolean
         get() = windowMode != WindowMode.NONE && windowStartMinutes != windowEndMinutes
 
     val canEdit: Boolean
-        get() = !protectedApp && settings.phase == OverridePhase.ACTIVE
+        get() = !protectedApp
 }
 
 class AppDetailViewModel(
@@ -113,10 +111,10 @@ class AppDetailViewModel(
     val state = combine(
         app.rules.observe(packageName),
         app.groups.observeAll(),
-        app.overrides.records,
+        app.focus.colorApps,
         tick,
         meta,
-    ) { rule, groups, _, _, info ->
+    ) { rule, groups, colorApps, _, info ->
         val used = app.engine.usedMs(packageName)
         val group = groups.firstOrNull { item ->
             item.members.any { it.packageName == packageName }
@@ -137,7 +135,7 @@ class AppDetailViewModel(
             groupName = group?.group?.name,
             groupLimitMinutes = group?.group?.dailyLimitMinutes ?: 0,
             groupUsedMs = group?.let { app.engine.groupUsedMs(it.group.id) } ?: 0L,
-            settings = app.overrides.settingsSnapshot(),
+            keepInColor = packageName in colorApps,
         )
     }.stateIn(
         viewModelScope,
@@ -178,8 +176,8 @@ class AppDetailViewModel(
         viewModelScope.launch { app.rules.setLimit(packageName, 0) }
     }
 
-    suspend fun requestSettings(minutes: Int, comment: String) {
-        app.overrides.submitSettings(minutes, comment)
+    fun setKeepInColor(on: Boolean) {
+        app.focus.setKeepInColor(packageName, on)
     }
 
     companion object {
@@ -337,19 +335,6 @@ fun AppDetailScreen(
             )
         }
 
-        if (!state.protectedApp) {
-            Spacer(Modifier.height(12.dp))
-            ApprovalCard(
-                snapshot = state.settings,
-                modifier = Modifier.padding(horizontal = 24.dp),
-                title = "Settings lock",
-                body = "Daily limits and time windows stay as they are until someone approves a change.",
-                requestLabel = "Request to change settings",
-                oncePerDayHint = "Once a day. After approval you can edit for that many minutes.",
-                onSubmit = vm::requestSettings,
-            )
-        }
-
         Spacer(Modifier.height(20.dp))
         Text(
             "Daily limit",
@@ -427,6 +412,15 @@ fun AppDetailScreen(
                 windowMode = WindowMode.NONE
                 vm.saveWindow(WindowMode.NONE, 0, 0)
             },
+        )
+
+        Spacer(Modifier.height(12.dp))
+        SwitchRow(
+            title = "Keep in color",
+            body = "Black and white is off while this app is open.",
+            checked = state.keepInColor,
+            onChange = vm::setKeepInColor,
+            modifier = Modifier.padding(horizontal = 24.dp),
         )
     }
 }

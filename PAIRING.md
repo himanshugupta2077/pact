@@ -30,35 +30,31 @@ That second person is the **reviewer**. They are not a parent-control company. T
 
 | Role | Device | Job |
 | --- | --- | --- |
-| You | Android phone with Pact | Use the phone. Hit limits. Ask for extra time or for permission to edit rules. |
+| You | Android phone with Pact | Use the phone. Hit limits. Ask for extra time. |
 | Reviewer | iPhone or Android browser | Open `/pact`, unlock with Face ID / biometrics, approve or deny. |
 
-The reviewer never types a PIN into your phone. There is no shared password you can reuse at 1am. Each ask is a one-shot request: which app or group or settings, how many minutes, and a short comment. The reviewer can grant a different duration than you asked for (up to 4 hours). When that clock runs out, the lock comes back by itself.
+The reviewer never types a PIN into your phone. There is no shared password you can reuse at 1am. Each ask is a one-shot request: which app or group, how many minutes, and a short comment. The reviewer can grant a different duration than you asked for (up to 4 hours). When that clock runs out, the lock comes back by itself.
 
 ## A normal day
 
 1. You installed Pact and granted **Usage access**, **Accessibility**, and **Notification access**.
 2. Together you pointed the phone at the reviewer’s server URL and bound one reviewer device.
-3. The reviewer approved a **settings** request so you could set limits while the edit window was open.
-4. After that window closed, limits stuck.
-5. You use Instagram until the daily cap. Pact covers it.
-6. If you really need ten more minutes, you tap **Request override**, pick 1–15 minutes, write why, send.
-7. The reviewer sees it in the inbox, approves or denies.
-8. The phone notices within a few seconds. If approved, that app (or every app in that group) works until the grant expires. Settings grants only unlock **editing**, not the blocked apps.
+3. You set limits, time windows and groups in Pact.
+4. You use Instagram until the daily cap. Pact covers it.
+5. If you really need ten more minutes, you tap **Request override**, pick 1–15 minutes, write why, send.
+6. The reviewer sees it in the inbox, approves or denies.
+7. The phone notices within a few seconds. If approved, that app (or every app in that group) works until the grant expires.
 
 Hard rules the phone and server both enforce:
 
-- One request per app / per group / for settings, per calendar day.
+- One request per app / per group, per calendar day.
 - You must write a comment.
 - You may ask for at most 15 minutes. The reviewer may grant 1–240 minutes.
 - A pending ask dies at local midnight if nobody answered.
-- Changing daily limits, time windows, groups, or the server URL needs a **settings** approval, then you may edit only for the granted minutes.
 
 ## What you need besides the APK
 
 The APK does not include the reviewer. Someone has to run a small server (a VPS is fine) that implements the API in Part 2, serve the inbox page at `https://your-host/pact/`, and keep that host on HTTPS.
-
-On a **fresh install**, you can save the server URL once with no approval. After the phone has sent any request, the URL locks until a settings grant. So: set the real URL first, then bind the reviewer, then request settings, then set limits.
 
 Do **not** point the phone at a server you control yourself if the whole point is that you cannot approve your own unlocks.
 
@@ -89,8 +85,6 @@ OverrideSync poll 2.5s while waiting, 12s idle
   approved + expires_at_ms ─────────► RuleEngine grants
                                         app  → skip block for that package
                                         group → skip block for every member
-                                        settings → RuleRepository / GroupRepository
-                                                   accept writes until expiry
 
                                       GET  /api/pact            (session)
                                       POST .../approve|deny     (session)
@@ -107,8 +101,6 @@ The phone **never** sends the reviewer’s cookie. Creating and polling requests
 | Base URL | `OverrideStore.serverUrl()` SharedPreferences `pact_overrides` / `server_url` | No trailing slash. Default compile-time `DEFAULT_PACT_SERVER` in `OverrideModels.kt`. |
 | Device id | `pact-` + UUID, persisted as `device_id` | Sent on every create. |
 | Client | `HttpURLConnection`, JSON, 8s connect / 15s read | |
-
-On a store with **zero** override records, the phone allows saving a new server URL. After any request is stored locally, changing the URL requires an active **settings** grant.
 
 If you ship a custom APK, set `DEFAULT_PACT_SERVER` to the friend’s VPS before `./gradlew :app:installDebug`.
 
@@ -263,7 +255,7 @@ The Android **Pact user** never talks to these auth routes.
 
 - If the wall clock jumped backwards by >2 minutes, clear active grants (anti-rollback).
 - Poll every pending `pendingId`.
-- Push maps into `RuleEngine.replaceGrants(apps, groups, settingsUntilMs)`.
+- Push maps into `RuleEngine.replaceGrants(apps, groups)`.
 
 Phases (`OverrideStore.snapshot`):
 
@@ -286,11 +278,11 @@ Phases (`OverrideStore.snapshot`):
 
 Windows: `ALLOW` = usable only inside `[start, end)`; `BLOCK` = locked inside that range. Overnight if `start > end`.
 
-Settings grant does **not** unlock blocked apps. It only flips `canEditSettings()` so `RuleRepository` / `GroupRepository` persist writes (`dailyLimitMinutes`, `windowMode`, members, server URL). Writes no-op when the grant is dead.
+The phone no longer sends `settings` requests: limits, groups and the server URL are always editable. The server may keep accepting the kind for older APKs.
 
 Group access grant unlocks **every member package** for the granted window.
 
-Lock overlay “Request override” calls `submit(APP, packageName, …)`. App detail / groups / setup call `submitSettings` or `submitGroup`.
+Lock overlay “Request override” calls `submit(APP, packageName, …)`. The group editor calls `submitGroup`.
 
 ## Persistence on the server
 
@@ -310,11 +302,10 @@ Do not put reviewer secrets in the request file.
 1. HTTPS reverse proxy + process serving `/pact/` and `/api/pact/*`
 2. Request store with create / get / approve / deny and the quotas above
 3. One-shot WebAuthn bind + session cookie
-4. Inbox UI: pending vs recent, kind badges (App / Group / Settings), custom duration 1–240
-5. Friend installs APK, sets server URL on a fresh install, reviewer binds, settings request, set limits
+4. Inbox UI: pending vs recent, kind badges (App / Group), custom duration 1–240
+5. Friend installs APK, sets server URL, reviewer binds, set limits
 6. Test: lock Instagram → request 5m → approve 10m → phone unlocks → wait out expiry → lock returns
-7. Test: settings request → edit a limit → wait out grant → Save is refused
-8. Test: second request same app same day → 409, phone shows already requested
+7. Test: second request same app same day → 409, phone shows already requested
 
 ## Suggested Android reviewer change
 
@@ -335,10 +326,10 @@ The phone APK does not need a change for that. Only the VPS inbox does.
 | `override/OverrideSync.kt` | submit, poll, push grants |
 | `override/OverrideModels.kt` | kinds, 15-minute cap, default URL |
 | `engine/RuleEngine.kt` | block decision |
-| `data/RuleRepository.kt` | per-app rules, gated by settings grant |
-| `data/GroupRepository.kt` | groups, same gate |
+| `data/RuleRepository.kt` | per-app rules |
+| `data/GroupRepository.kt` | groups |
 | `ui/common/ApprovalCard.kt` | request UI |
 | `ui/block/BlockScreen.kt` | lock overlay request |
-| `ui/setup/SetupScreen.kt` | permissions + server URL + settings lock |
+| `ui/setup/SetupScreen.kt` | permissions, black and white, blocked websites, server URL |
 
 That is the whole pairing surface. Screen-time charts, usage bars, and the rest of the APK are local-only and do not talk to the VPS.
