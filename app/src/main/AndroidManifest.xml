@@ -60,6 +60,14 @@
             android:theme="@style/Theme.Pact.Block"
             android:windowSoftInputMode="adjustResize" />
 
+        <!-- Behind the payment shortcuts: switches accessibility and debugging off, then opens the app. -->
+        <activity
+            android:name=".PaymentLaunchActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <service
             android:name=".enforce.PactAccessibilityService"
             android:exported="true"

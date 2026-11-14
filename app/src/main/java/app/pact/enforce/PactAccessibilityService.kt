@@ -2,6 +2,9 @@ package app.pact.enforce
 
 import android.accessibilityservice.AccessibilityService
 import android.app.KeyguardManager
+import android.app.usage.UsageEvents
+import android.app.usage.UsageStatsManager
+import android.content.ComponentName
 import android.content.res.Configuration
 import android.graphics.Rect
 import android.os.Build
@@ -12,6 +15,7 @@ import android.os.SystemClock
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityWindowInfo
 import app.pact.PactApp
+import app.pact.data.FocusStore
 
 class PactAccessibilityService : AccessibilityService() {
 
@@ -26,6 +30,8 @@ class PactAccessibilityService : AccessibilityService() {
     private var lastSilenceUptime = 0L
     private var hideScheduled = false
     private var colorPackage: String? = null
+    private var colorScreenPackage: String? = null
+    private val activityClasses = HashMap<String, Boolean>()
 
     private val tick = object : Runnable {
         override fun run() {
@@ -49,6 +55,7 @@ class PactAccessibilityService : AccessibilityService() {
         overlay = BlockOverlay(this) { goHome() }
         media = (application as? PactApp)?.media ?: MediaSilencer(this)
         sites = SiteBlocker(this)
+        seedScreen()
         handler.removeCallbacks(tick)
         handler.post(tick)
     }
@@ -60,7 +67,42 @@ class PactAccessibilityService : AccessibilityService() {
         ) {
             return
         }
+        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) noteScreen(event)
         enforce(force = false)
+    }
+
+    /** Tracks whether the app in front is showing a screen kept in color, like a photo. */
+    private fun noteScreen(event: AccessibilityEvent) {
+        val pkg = event.packageName?.toString() ?: return
+        val cls = event.className?.toString() ?: return
+        if (cls in FocusStore.COLOR_SCREENS) {
+            colorScreenPackage = pkg
+            return
+        }
+        // Dialogs and menus send this event too. Only another activity of the app ends it.
+        if (pkg == colorScreenPackage && isActivity(pkg, cls)) colorScreenPackage = null
+    }
+
+    /** The screen already open when the service connects, e.g. after a payment session. */
+    private fun seedScreen() {
+        val usm = getSystemService(UsageStatsManager::class.java) ?: return
+        val now = System.currentTimeMillis()
+        val events = runCatching { usm.queryEvents(now - 30 * 60_000L, now) }.getOrNull() ?: return
+        val event = UsageEvents.Event()
+        var pkg: String? = null
+        var cls: String? = null
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+            if (Build.VERSION.SDK_INT >= 29 && event.eventType == UsageEvents.Event.ACTIVITY_RESUMED) {
+                pkg = event.packageName
+                cls = event.className
+            }
+        }
+        if (pkg != null && cls in FocusStore.COLOR_SCREENS) colorScreenPackage = pkg
+    }
+
+    private fun isActivity(pkg: String, cls: String): Boolean = activityClasses.getOrPut(cls) {
+        runCatching { packageManager.getActivityInfo(ComponentName(pkg, cls), 0) }.isSuccess
     }
 
     override fun onInterrupt() = Unit
@@ -95,6 +137,8 @@ class PactAccessibilityService : AccessibilityService() {
             return
         }
         val top = topUserPackage()
+        // Switches this service off, so nothing else runs until the payment app is left.
+        if (top != null && top in app.focus.paymentApps.value && BankMode.enter(this, top)) return
         updateGrayscale(app, top)
         if (getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true) {
             app.engine.setCovering(null)
@@ -165,7 +209,9 @@ class PactAccessibilityService : AccessibilityService() {
     private fun updateGrayscale(app: PactApp, top: String?) {
         if (!app.focus.grayscale.value) return
         if (top != null && top != packageName) colorPackage = top
-        val color = SecureSettings.inCall(this) || colorPackage in app.focus.colorApps.value
+        val color = SecureSettings.inCall(this) ||
+            colorPackage in app.focus.colorApps.value ||
+            (colorScreenPackage != null && colorScreenPackage == colorPackage)
         SecureSettings.setGrayscale(this, !color)
     }
 

@@ -4,7 +4,7 @@ import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
-/** Black-and-white screen and blocked websites. */
+/** Black-and-white screen, blocked websites and payment apps. */
 class FocusStore(context: Context) {
     private val prefs = context.getSharedPreferences("pact_focus", Context.MODE_PRIVATE)
 
@@ -17,6 +17,9 @@ class FocusStore(context: Context) {
     private val _blockedSites = MutableStateFlow(readSet(KEY_SITES, DEFAULT_SITES))
     val blockedSites: StateFlow<Set<String>> = _blockedSites
 
+    private val _paymentApps = MutableStateFlow(readSet(KEY_PAYMENT_APPS, DEFAULT_PAYMENT_APPS))
+    val paymentApps: StateFlow<Set<String>> = _paymentApps
+
     fun setGrayscale(on: Boolean) {
         prefs.edit().putBoolean(KEY_GRAYSCALE, on).apply()
         _grayscale.value = on
@@ -27,6 +30,13 @@ class FocusStore(context: Context) {
         val next = if (on) _colorApps.value + packageName else _colorApps.value - packageName
         prefs.edit().putStringSet(KEY_COLOR_APPS, next).apply()
         _colorApps.value = next
+    }
+
+    @Synchronized
+    fun setPaymentApp(packageName: String, on: Boolean) {
+        val next = if (on) _paymentApps.value + packageName else _paymentApps.value - packageName
+        prefs.edit().putStringSet(KEY_PAYMENT_APPS, next).apply()
+        _paymentApps.value = next
     }
 
     /** Returns the stored host, or null when [raw] is not a usable domain. */
@@ -68,6 +78,7 @@ class FocusStore(context: Context) {
         private const val KEY_GRAYSCALE = "grayscale"
         private const val KEY_COLOR_APPS = "color_apps"
         private const val KEY_SITES = "blocked_sites"
+        private const val KEY_PAYMENT_APPS = "payment_apps"
 
         val DEFAULT_SITES = setOf(
             "youtube.com",
@@ -76,6 +87,30 @@ class FocusStore(context: Context) {
             "x.com",
             "twitter.com",
             "reddit.com",
+        )
+
+        /** Banking and UPI apps that refuse to run beside an accessibility service. */
+        val DEFAULT_PAYMENT_APPS = setOf(
+            "com.phonepe.app",
+            "in.org.npci.upiapp",
+            "net.one97.paytm",
+            "com.google.android.apps.nbu.paisa.user",
+            "com.dreamplug.androidapp",
+            "com.csam.icici.bank.imobile",
+            "com.hdfcbank.android.now",
+            "com.sbi.lotusintouch",
+        )
+
+        /** Screens that stay in color inside apps that are otherwise black and white. */
+        val COLOR_SCREENS = setOf(
+            "com.whatsapp.mediaview.MediaViewActivity",
+            "com.whatsapp.mediaview.single.SingleMediaViewActivity",
+            "com.whatsapp.conversation.conversationrow.album.MediaAlbumActivity",
+            "com.whatsapp.gallery.ui.MediaGalleryActivity",
+            "com.whatsapp.camera.ui.CameraActivity",
+            "com.whatsapp.camera.ui.LauncherCameraActivity",
+            "com.whatsapp.mediacomposer.ui.app.MediaComposerActivity",
+            "com.whatsapp.gallerypicker.ui.MediaPickerActivity",
         )
 
         /** "https://www.YouTube.com/watch?v=1" -> "youtube.com". */

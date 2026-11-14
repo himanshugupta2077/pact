@@ -48,6 +48,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.pact.PactApp
+import app.pact.PaymentLaunchActivity
 import app.pact.data.WindowMode
 import app.pact.ui.common.AppIcon
 import app.pact.ui.common.DEFAULT_WINDOW_END
@@ -87,6 +88,7 @@ data class AppDetailState(
     val groupLimitMinutes: Int = 0,
     val groupUsedMs: Long = 0L,
     val keepInColor: Boolean = false,
+    val paymentApp: Boolean = false,
 ) {
     val hasWindow: Boolean
         get() = windowMode != WindowMode.NONE && windowStartMinutes != windowEndMinutes
@@ -136,6 +138,7 @@ class AppDetailViewModel(
             groupLimitMinutes = group?.group?.dailyLimitMinutes ?: 0,
             groupUsedMs = group?.let { app.engine.groupUsedMs(it.group.id) } ?: 0L,
             keepInColor = packageName in colorApps,
+            paymentApp = packageName in app.focus.paymentApps.value,
         )
     }.stateIn(
         viewModelScope,
@@ -178,6 +181,12 @@ class AppDetailViewModel(
 
     fun setKeepInColor(on: Boolean) {
         app.focus.setKeepInColor(packageName, on)
+    }
+
+    fun setPaymentApp(on: Boolean) {
+        app.focus.setPaymentApp(packageName, on)
+        app.scope.launch { runCatching { PaymentLaunchActivity.publishShortcuts(app) } }
+        tick.value = System.currentTimeMillis()
     }
 
     companion object {
@@ -420,6 +429,16 @@ fun AppDetailScreen(
             body = "Black and white is off while this app is open.",
             checked = state.keepInColor,
             onChange = vm::setKeepInColor,
+            modifier = Modifier.padding(horizontal = 24.dp),
+        )
+
+        Spacer(Modifier.height(12.dp))
+        SwitchRow(
+            title = "Payment app",
+            body = "While it's open, accessibility, Developer options and USB debugging switch off so it " +
+                "works. They come back when you leave. Up to 20 minutes at a time, 30 a day.",
+            checked = state.paymentApp,
+            onChange = vm::setPaymentApp,
             modifier = Modifier.padding(horizontal = 24.dp),
         )
     }

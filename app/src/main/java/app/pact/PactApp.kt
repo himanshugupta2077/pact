@@ -11,6 +11,7 @@ import app.pact.data.PopupExclusionStore
 import app.pact.data.RuleRepository
 import app.pact.data.UsageRepository
 import app.pact.engine.RuleEngine
+import app.pact.enforce.BankMode
 import app.pact.enforce.MediaSilencer
 import app.pact.enforce.SecureSettings
 import android.util.Log
@@ -76,9 +77,15 @@ class PactApp : Application() {
         scope.launch {
             runCatching { overrides.runLoop() }
         }
+        // A payment-app session left over from a crash or reboot: nothing is watching it now.
+        BankMode.restore(this, "Pact restarted")
+        scope.launch { BankMode.watch(this@PactApp) }
+        scope.launch { runCatching { PaymentLaunchActivity.publishShortcuts(this@PactApp) } }
         scope.launch {
             while (isActive) {
-                if (SecureSettings.ensureAccessibility(this@PactApp)) {
+                if (BankMode.isActive(this@PactApp)) {
+                    if (BankMode.isStale(this@PactApp)) BankMode.restore(this@PactApp, "stale")
+                } else if (SecureSettings.ensureAccessibility(this@PactApp)) {
                     Log.i("Pact", "accessibility service was off; turned it back on")
                 }
                 delay(15_000)

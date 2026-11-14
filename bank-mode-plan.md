@@ -2,7 +2,14 @@
 
 Banking and UPI apps refuse to work while Pact's accessibility service is on, and some also check Developer options and USB debugging. Pact already turns its service back on every 15 s, so turning it off by hand doesn't stick. Bank mode switches those settings off while a banking app is in front and puts them back when you leave, without opening a hole in Pact's blocking.
 
-Status: plan only, 2026-11-14. Reviewed by the critic. The build waits for step 0, which needs the phone over USB.
+Status 2026-11-14: built and working on the phone.
+
+- Auto mode: opening a payment app switches everything off. BHIM checks the instant it starts, so it needs the shortcut instead.
+- Shortcuts: long-press Pact, or double-press power. `PaymentLaunchActivity` switches everything off first, then opens the app. The double-press opens BHIM's QR scanner (secure `nt_double_tap_power_data` points at Pact's `pay-scan-bhim` shortcut).
+- Learned on the phone:
+  - BHIM also checks for a VPN (Tailscale now excludes BHIM) and USB debugging.
+  - Android 16 refuses an explicit intent into another app unless it matches one of that app's filters, so Pact sends the launcher intent with the shortcut extra.
+- Testing over USB: `keep_adb=true` in `shared_prefs/pact_bank.xml` (set with run-as) keeps USB debugging on. BHIM then complains about USB, so remove it after testing.
 
 ## Ideas taken (concepts only, no code copied; Warden and IMD are GPL)
 
