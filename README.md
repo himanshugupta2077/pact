@@ -10,7 +10,7 @@ This slice:
 4. App groups with a shared daily limit and time window
 5. **Request override** — ask for 1–15 minutes with a comment. The request goes to the toolkit server. Approving it unlocks that app (or group) for the granted time.
 6. **Blocked websites** — sites such as youtube.com stay closed in Chrome, Brave, Firefox and other common browsers, so a banned app can't be opened in the browser instead. Edit the list on the setup screen.
-7. **Black and white** — the screen stays grey, with color during calls using the camera, in Brawl Stars, and in apps switched to "Keep in color" on their page.
+7. **Black and white** — the screen stays grey, with color during calls using the camera or showing WhatsApp remote video, in Brawl Stars, and in apps switched to "Keep in color" on their page.
 
 Limits, windows, groups and the server URL can be changed at any time.
 

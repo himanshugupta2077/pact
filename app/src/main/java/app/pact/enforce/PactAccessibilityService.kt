@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
+import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityWindowInfo
 import app.pact.PactApp
@@ -215,14 +216,49 @@ class PactAccessibilityService : AccessibilityService() {
         silenceIfDue(app, visible = false)
     }
 
-    /** Calls need an active camera to qualify for color. Audio calls stay grayscale. */
+    /** Remote video also qualifies when our own camera is off. */
     private fun updateGrayscale(app: PactApp, top: String?) {
         if (!app.focus.grayscale.value) return
         if (top != null && top != packageName) colorPackage = top
-        val color = (SecureSettings.inCall(this) && busyCameras.isNotEmpty()) ||
+        val color = (SecureSettings.inCall(this) &&
+            (busyCameras.isNotEmpty() || whatsappVideoVisible())) ||
             colorPackage in app.focus.colorApps.value ||
             (colorScreenPackage != null && colorScreenPackage == colorPackage)
         SecureSettings.setGrayscale(this, !color)
+    }
+
+    private fun whatsappVideoVisible(): Boolean {
+        return windows.orEmpty().any { window ->
+            if (window.type != AccessibilityWindowInfo.TYPE_APPLICATION) return@any false
+            val root = window.root ?: return@any false
+            try {
+                val pkg = root.packageName?.toString()
+                if (pkg != "com.whatsapp" && pkg != "com.whatsapp.w4b") return@any false
+                hasRemoteVideo(root)
+            } finally {
+                @Suppress("DEPRECATION")
+                root.recycle()
+            }
+        }
+    }
+
+    private fun hasRemoteVideo(node: AccessibilityNodeInfo): Boolean {
+        // These are video-rendering views, not the "start video" button on audio calls.
+        if (node.isVisibleToUser && node.viewIdResourceName?.substringAfter(":id/") in
+            setOf("peer_video_texture_view", "peer_video_output_holder", "peer_video_output_card",
+                "surface_view")) {
+            return true
+        }
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            try {
+                if (hasRemoteVideo(child)) return true
+            } finally {
+                @Suppress("DEPRECATION")
+                child.recycle()
+            }
+        }
+        return false
     }
 
     private fun stillLocked(app: PactApp, pkg: String): Boolean {
