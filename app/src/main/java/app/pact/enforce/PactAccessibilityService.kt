@@ -7,6 +7,7 @@ import android.app.usage.UsageStatsManager
 import android.content.ComponentName
 import android.content.res.Configuration
 import android.graphics.Rect
+import android.hardware.camera2.CameraManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -29,6 +30,12 @@ class PactAccessibilityService : AccessibilityService() {
     private var lastEnforceUptime = 0L
     private var lastSilenceUptime = 0L
     private var hideScheduled = false
+    private val busyCameras = mutableSetOf<String>()
+    private val cameraCallback = object : CameraManager.AvailabilityCallback() {
+        override fun onCameraAvailable(cameraId: String) { busyCameras.remove(cameraId) }
+        override fun onCameraUnavailable(cameraId: String) { busyCameras.add(cameraId) }
+    }
+
     private var colorPackage: String? = null
     private var colorScreenPackage: String? = null
     private val activityClasses = HashMap<String, Boolean>()
@@ -55,6 +62,7 @@ class PactAccessibilityService : AccessibilityService() {
         overlay = BlockOverlay(this) { goHome() }
         media = (application as? PactApp)?.media ?: MediaSilencer(this)
         sites = SiteBlocker(this)
+        getSystemService(CameraManager::class.java)?.registerAvailabilityCallback(cameraCallback, handler)
         seedScreen()
         handler.removeCallbacks(tick)
         handler.post(tick)
@@ -115,6 +123,8 @@ class PactAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         handler.removeCallbacks(tick)
         handler.removeCallbacks(hideRunnable)
+        getSystemService(CameraManager::class.java)?.unregisterAvailabilityCallback(cameraCallback)
+        busyCameras.clear()
         covering = null
         (application as? PactApp)?.engine?.setCovering(null)
         if (::overlay.isInitialized) overlay.hide()
@@ -205,11 +215,11 @@ class PactAccessibilityService : AccessibilityService() {
         silenceIfDue(app, visible = false)
     }
 
-    /** Black and white unless a call is on or the last real app is kept in color. */
+    /** Calls need an active camera to qualify for color. Audio calls stay grayscale. */
     private fun updateGrayscale(app: PactApp, top: String?) {
         if (!app.focus.grayscale.value) return
         if (top != null && top != packageName) colorPackage = top
-        val color = SecureSettings.inCall(this) ||
+        val color = (SecureSettings.inCall(this) && busyCameras.isNotEmpty()) ||
             colorPackage in app.focus.colorApps.value ||
             (colorScreenPackage != null && colorScreenPackage == colorPackage)
         SecureSettings.setGrayscale(this, !color)

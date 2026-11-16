@@ -11,7 +11,16 @@ class FocusStore(context: Context) {
     private val _grayscale = MutableStateFlow(prefs.getBoolean(KEY_GRAYSCALE, false))
     val grayscale: StateFlow<Boolean> = _grayscale
 
-    private val _colorApps = MutableStateFlow(readSet(KEY_COLOR_APPS, emptySet()))
+    private val _colorApps = MutableStateFlow(run {
+        // Apply once to existing installs while preserving later user choices.
+        val saved = readSet(KEY_COLOR_APPS, emptySet())
+        if (prefs.getBoolean("brawl_stars_color_added", false)) saved else {
+            val next = saved + "com.supercell.brawlstars"
+            prefs.edit().putStringSet(KEY_COLOR_APPS, next)
+                .putBoolean("brawl_stars_color_added", true).apply()
+            next
+        }
+    })
     val colorApps: StateFlow<Set<String>> = _colorApps
 
     private val _blockedSites = MutableStateFlow(readSet(KEY_SITES, DEFAULT_SITES))

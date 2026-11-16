@@ -173,7 +173,7 @@ fun SetupScreen(
             body = if (canWriteSecure) {
                 val kept = colorApps.size
                 val apps = if (kept == 1) "1 app" else "$kept apps"
-                "Grey screen all the time. Color comes back during calls and in $apps " +
+                "Grey screen all the time. Color comes back during calls using the camera and in $apps " +
                     "you keep in color (switch on each app's page)."
             } else {
                 "Needs one permission from a computer first: ${SecureSettings.GRANT_COMMAND}"
