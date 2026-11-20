@@ -44,12 +44,6 @@ class RuleEngine(
     @Volatile
     private var groupIndex: GroupIndex = GroupIndex.Empty
 
-    @Volatile
-    private var appGrants: Map<String, Long> = emptyMap()
-
-    @Volatile
-    private var groupGrants: Map<String, Long> = emptyMap()
-
     // Swapped whole so a reader never sees it half-filled.
     @Volatile
     private var usageBase: Map<String, Long> = emptyMap()
@@ -68,25 +62,6 @@ class RuleEngine(
 
     fun replaceRules(next: List<AppRule>) {
         rules = next.associateBy { it.packageName }
-    }
-
-    fun replaceGrants(
-        apps: Map<String, Long>,
-        groups: Map<String, Long>,
-    ) {
-        appGrants = apps
-        groupGrants = groups
-    }
-
-    fun hasActiveOverride(packageName: String, now: Long = System.currentTimeMillis()): Boolean {
-        val until = appGrants[packageName] ?: 0L
-        if (until > now) return true
-        val group = groupFor(packageName) ?: return false
-        return (groupGrants[group.id] ?: 0L) > now
-    }
-
-    fun hasActiveGroupOverride(groupId: String, now: Long = System.currentTimeMillis()): Boolean {
-        return (groupGrants[groupId] ?: 0L) > now
     }
 
     fun replaceGroups(next: List<GroupRule>) {
@@ -225,7 +200,6 @@ class RuleEngine(
 
     fun blockDecision(packageName: String, now: Long = System.currentTimeMillis()): BlockDecision {
         if (isProtected(packageName)) return BlockDecision()
-        if (hasActiveOverride(packageName, now)) return BlockDecision()
         val rule = rules[packageName]
         val used = usedMs(packageName)
         if (rule != null && rule.hasLimit && used >= rule.dailyLimitMinutes * 60_000L) {
@@ -267,7 +241,6 @@ class RuleEngine(
     }
 
     fun groupRestrictionHit(group: GroupRule, now: Long = System.currentTimeMillis()): Boolean {
-        if (hasActiveGroupOverride(group.id, now)) return false
         if (group.hasLimit && groupUsedMs(group) >= group.dailyLimitMinutes * 60_000L) return true
         return group.blocksAt(minutesOfDay())
     }

@@ -66,8 +66,6 @@ fun SetupScreen(
     val context = LocalContext.current
     val app = context.applicationContext as PactApp
     val scheme = MaterialTheme.colorScheme
-    var serverUrl by remember { mutableStateOf(app.overrides.serverUrl()) }
-    var serverSaved by remember { mutableStateOf(false) }
     val grayscale by app.focus.grayscale.collectAsStateWithLifecycle()
     val colorApps by app.focus.colorApps.collectAsStateWithLifecycle()
     val sites by app.focus.blockedSites.collectAsStateWithLifecycle()
@@ -235,42 +233,6 @@ fun SetupScreen(
         }
 
         Spacer(Modifier.height(28.dp))
-        Text("Override server", style = MaterialTheme.typography.titleLarge, color = scheme.onBackground)
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Requests go here. Open /pact on that server to approve them.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = scheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(12.dp))
-        OutlinedTextField(
-            value = serverUrl,
-            onValueChange = {
-                serverUrl = it
-                serverSaved = false
-            },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Server URL") },
-            placeholder = { Text("https://pact.example") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-            shape = RoundedCornerShape(14.dp),
-            colors = pactFieldColors(),
-        )
-        Spacer(Modifier.height(12.dp))
-        OutlinedButton(
-            onClick = {
-                app.overrides.setServerUrl(serverUrl)
-                serverUrl = app.overrides.serverUrl()
-                serverSaved = true
-            },
-            modifier = Modifier.fillMaxWidth().height(48.dp),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = scheme.onBackground),
-        ) {
-            Text(if (serverSaved) "Saved" else "Save server", color = scheme.onBackground)
-        }
-        Spacer(Modifier.height(12.dp))
         TextButton(
             onClick = {
                 val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)

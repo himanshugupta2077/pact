@@ -32,7 +32,6 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
-        buildConfigField("String", "DEFAULT_SERVER", asBuildConfigString(pactLocalText(pactLocalValues, "server")))
         buildConfigField("String", "SHIP_UPLOAD_URL", asBuildConfigString(pactLocalText(pactLocalValues, "uploadUrl")))
         buildConfigField("String", "SHIP_DEVICE_ID", asBuildConfigString(pactLocalText(pactLocalValues, "phoneDeviceId")))
         buildConfigField("String", "SHIP_HOSTNAME", asBuildConfigString(pactLocalText(pactLocalValues, "phoneHostname")))

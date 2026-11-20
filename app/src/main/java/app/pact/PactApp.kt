@@ -15,9 +15,6 @@ import app.pact.enforce.BankMode
 import app.pact.enforce.MediaSilencer
 import app.pact.enforce.SecureSettings
 import android.util.Log
-import app.pact.override.OverrideClient
-import app.pact.override.OverrideStore
-import app.pact.override.OverrideSync
 import app.pact.ship.PhoneShip
 import app.pact.util.hasUsageAccess
 import kotlinx.coroutines.CoroutineScope
@@ -31,7 +28,6 @@ class PactApp : Application() {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     val db by lazy { PactDatabase.create(this) }
-    val overrideStore by lazy { OverrideStore(this) }
     val exclusions by lazy { OverlayExclusionStore(this) }
     val popups by lazy { PopupExclusionStore(this) }
     val rules by lazy { RuleRepository(db.appRuleDao()) }
@@ -47,10 +43,11 @@ class PactApp : Application() {
     val engine by lazy { RuleEngine(this, usage, installed, exclusions, popups) }
     val media by lazy { MediaSilencer(this) }
     val focus by lazy { FocusStore(this) }
-    val overrides by lazy { OverrideSync(overrideStore, OverrideClient(overrideStore), engine) }
 
     override fun onCreate() {
         super.onCreate()
+        // Leftover from the removed override feature: drops any saved grant.
+        deleteSharedPreferences("pact_overrides")
         instance = this
         usage.exclusions = exclusions
         usage.popups = popups
@@ -73,9 +70,6 @@ class PactApp : Application() {
                 }
                 delay(4_000)
             }
-        }
-        scope.launch {
-            runCatching { overrides.runLoop() }
         }
         // A payment-app session left over from a crash or reboot: nothing is watching it now.
         BankMode.restore(this, "Pact restarted")

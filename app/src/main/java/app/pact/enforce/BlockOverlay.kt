@@ -1,31 +1,21 @@
 package app.pact.enforce
 
 import android.accessibilityservice.AccessibilityService
-import android.content.Context
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
-import android.text.InputType
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
-import android.view.inputmethod.EditorInfo
-import android.view.inputmethod.InputMethodManager
-import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import app.pact.PactApp
-import app.pact.override.MAX_OVERRIDE_MINUTES
-import kotlinx.coroutines.launch
-import app.pact.override.OVERRIDE_MINUTE_CHIPS
-import app.pact.override.OverrideException
-import app.pact.override.OverridePhase
 import app.pact.ui.block.lockSnapshot
 import kotlin.math.min
 
@@ -36,10 +26,8 @@ class BlockOverlay(
 
     private val density = service.resources.displayMetrics.density
     private val wm = service.getSystemService(WindowManager::class.java)
-    private val imm = service.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
 
     private var root: View? = null
-    private var layoutParams: WindowManager.LayoutParams? = null
     private var contentColumn: LinearLayout? = null
     private var nameView: TextView? = null
     private var headlineView: TextView? = null
@@ -52,16 +40,6 @@ class BlockOverlay(
     private var groupValue: TextView? = null
     private var usedWeekValue: TextView? = null
     private var streakView: TextView? = null
-    private var requestView: TextView? = null
-    private var formPanel: View? = null
-    private var commentField: EditText? = null
-    private var errorView: TextView? = null
-    private var sendView: TextView? = null
-    private val minuteChips = mutableListOf<TextView>()
-
-    private var formOpen = false
-    private var sending = false
-    private var selectedMinutes = 5
     private var copySeed = 0L
 
     var shownPackage: String? = null
@@ -77,11 +55,10 @@ class BlockOverlay(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            overlayFlags(ime = false),
+            overlayFlags(),
             PixelFormat.TRANSLUCENT,
         )
         params.gravity = Gravity.FILL
-        params.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         params.screenOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         if (Build.VERSION.SDK_INT >= 28) {
             params.layoutInDisplayCutoutMode =
@@ -90,16 +67,13 @@ class BlockOverlay(
         val added = runCatching { wm.addView(view, params) }.isSuccess
         if (!added) return
         root = view
-        layoutParams = params
         bind(packageName)
     }
 
     fun hide() {
-        hideIme()
         val view = root ?: return
         runCatching { wm.removeView(view) }
         root = null
-        layoutParams = null
         contentColumn = null
         nameView = null
         headlineView = null
@@ -112,14 +86,6 @@ class BlockOverlay(
         groupValue = null
         usedWeekValue = null
         streakView = null
-        requestView = null
-        formPanel = null
-        commentField = null
-        errorView = null
-        sendView = null
-        minuteChips.clear()
-        formOpen = false
-        sending = false
         shownPackage = null
         copySeed = 0L
     }
@@ -129,8 +95,7 @@ class BlockOverlay(
     }
 
     private fun bind(packageName: String) {
-        val packageChanged = shownPackage != packageName
-        if (packageChanged || shownPackage == null) {
+        if (shownPackage != packageName) {
             copySeed = System.nanoTime()
         }
         shownPackage = packageName
@@ -164,24 +129,6 @@ class BlockOverlay(
             streakView?.visibility = View.VISIBLE
             streakView?.text = streak
         }
-
-        val phase = app.overrides.snapshot(packageName).phase
-        if (packageChanged || phase != OverridePhase.AVAILABLE) {
-            closeForm()
-        }
-        if (formOpen) return
-
-        requestView?.visibility = View.VISIBLE
-        requestView?.text = when (phase) {
-            OverridePhase.WAITING -> "Waiting for approval"
-            OverridePhase.DENIED -> "Request declined · try tomorrow"
-            OverridePhase.USED -> "Already requested today"
-            OverridePhase.ACTIVE -> "Approved. Open the app again."
-            OverridePhase.AVAILABLE -> "Request override"
-        }
-        val canAsk = phase == OverridePhase.AVAILABLE
-        requestView?.isEnabled = canAsk
-        requestView?.alpha = if (canAsk) 1f else 0.7f
     }
 
     private fun build(): View {
@@ -221,30 +168,9 @@ class BlockOverlay(
         )
 
         column.addView(
-            pill("Gotcha!", RUST, PAPER) {
-                closeForm()
-                onHome()
-            },
+            pill("Gotcha!", RUST, PAPER) { onHome() },
             matchWrap(),
         )
-
-        val form = buildForm()
-        form.visibility = View.GONE
-        formPanel = form
-        column.addView(form, matchWrap(top = dp(12)))
-
-        requestView = label(sizeSp = 13f, color = MUTED).apply {
-            isClickable = true
-            isFocusable = true
-            minHeight = dp(48)
-            gravity = Gravity.CENTER
-            setPadding(dp(8), dp(12), dp(8), dp(4))
-            setOnClickListener {
-                if (!isEnabled) return@setOnClickListener
-                openForm()
-            }
-        }
-        column.addView(requestView, matchWrap(top = dp(2)))
 
         val frame = FrameLayout(service).apply {
             setBackgroundColor(INK)
@@ -287,197 +213,11 @@ class BlockOverlay(
         }
     }
 
-    private fun buildForm(): LinearLayout {
-        val form = card()
-        form.addView(
-            label("How long?", 16f, PAPER),
-            matchWrap(),
-        )
-        form.addView(
-            label("Max $MAX_OVERRIDE_MINUTES minutes. Once a day per app.", 13f, MUTED),
-            matchWrap(top = dp(6)),
-        )
-
-        val chips = LinearLayout(service).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-        }
-        OVERRIDE_MINUTE_CHIPS.forEach { minutes ->
-            val chip = chip("${minutes}m") {
-                selectedMinutes = minutes
-                paintChips()
-            }
-            minuteChips += chip
-            chips.addView(
-                chip,
-                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    marginStart = dp(4)
-                    marginEnd = dp(4)
-                },
-            )
-        }
-        form.addView(chips, matchWrap(top = dp(12)))
-        paintChips()
-
-        val field = EditText(service).apply {
-            hint = "Why do you need this?"
-            setHintTextColor(MUTED)
-            setTextColor(PAPER)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-            setPadding(dp(14), dp(12), dp(14), dp(12))
-            minHeight = dp(88)
-            gravity = Gravity.TOP or Gravity.START
-            inputType = InputType.TYPE_CLASS_TEXT or
-                InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
-                InputType.TYPE_TEXT_FLAG_MULTI_LINE
-            imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
-            maxLines = 4
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                setColor(INK)
-                setStroke(dp(1), LINE)
-                cornerRadius = 12 * density
-            }
-        }
-        commentField = field
-        form.addView(field, matchWrap(top = dp(12)))
-
-        errorView = label(sizeSp = 13f, color = 0xFFC4543A.toInt(), align = Gravity.START).apply {
-            visibility = View.GONE
-        }
-        form.addView(errorView, matchWrap(top = dp(8)))
-
-        sendView = pill("Send request", RUST, PAPER) { sendRequest() }
-        form.addView(sendView, matchWrap(top = dp(12)))
-        form.addView(
-            label("Cancel", 13f, MUTED).apply {
-                isClickable = true
-                isFocusable = true
-                setPadding(dp(8), dp(12), dp(8), dp(4))
-                setOnClickListener { closeForm() }
-            },
-            matchWrap(),
-        )
-        return form
-    }
-
-    private fun openForm() {
-        if (formOpen) return
-        formOpen = true
-        sending = false
-        selectedMinutes = 5
-        commentField?.setText("")
-        errorView?.visibility = View.GONE
-        sendView?.isEnabled = true
-        sendView?.alpha = 1f
-        paintChips()
-        requestView?.visibility = View.GONE
-        formPanel?.visibility = View.VISIBLE
-        applyIme(true)
-    }
-
-    private fun closeForm() {
-        if (!formOpen && formPanel?.visibility != View.VISIBLE) return
-        hideIme()
-        formOpen = false
-        sending = false
-        formPanel?.visibility = View.GONE
-        requestView?.visibility = View.VISIBLE
-        applyIme(false)
-    }
-
-    private fun sendRequest() {
-        if (sending) return
-        val pkg = shownPackage ?: return
-        val app = service.application as? PactApp ?: return
-        val comment = commentField?.text?.toString()?.trim().orEmpty()
-        if (comment.isEmpty()) {
-            showError("Write a short comment first.")
-            return
-        }
-        val minutes = selectedMinutes.coerceIn(1, MAX_OVERRIDE_MINUTES)
-        sending = true
-        sendView?.isEnabled = false
-        sendView?.alpha = 0.7f
-        errorView?.visibility = View.GONE
-        val label = app.installed.labelOf(pkg)
-        app.scope.launch {
-            try {
-                app.overrides.submit(pkg, label, minutes, comment)
-                (root ?: return@launch).post {
-                    sending = false
-                    closeForm()
-                    bind(pkg)
-                }
-            } catch (e: OverrideException) {
-                (root ?: return@launch).post {
-                    sending = false
-                    sendView?.isEnabled = true
-                    sendView?.alpha = 1f
-                    showError(e.message)
-                    if (e.remote != null) {
-                        closeForm()
-                        bind(pkg)
-                    }
-                }
-            } catch (_: Exception) {
-                (root ?: return@launch).post {
-                    sending = false
-                    sendView?.isEnabled = true
-                    sendView?.alpha = 1f
-                    showError("Could not send the request.")
-                }
-            }
-        }
-    }
-
-    private fun showError(message: String) {
-        errorView?.visibility = View.VISIBLE
-        errorView?.text = message
-    }
-
-    private fun paintChips() {
-        minuteChips.forEachIndexed { index, chip ->
-            val minutes = OVERRIDE_MINUTE_CHIPS.getOrNull(index) ?: return@forEachIndexed
-            val selected = minutes == selectedMinutes
-            chip.setTextColor(if (selected) PAPER else MUTED)
-            chip.background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                setColor(if (selected) RUST else INK)
-                setStroke(dp(1), if (selected) RUST else LINE)
-                cornerRadius = 20 * density
-            }
-        }
-    }
-
-    private fun applyIme(enable: Boolean) {
-        val view = root ?: return
-        val params = layoutParams ?: return
-        params.flags = overlayFlags(ime = enable)
-        params.softInputMode = if (enable) {
-            WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
-        } else {
-            WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN or
-                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
-        }
-        runCatching { wm.updateViewLayout(view, params) }
-    }
-
-    private fun hideIme() {
-        val field = commentField ?: return
-        field.clearFocus()
-        imm.hideSoftInputFromWindow(field.windowToken, 0)
-    }
-
-    private fun overlayFlags(ime: Boolean): Int {
-        var flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+    private fun overlayFlags(): Int =
+        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
             WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS or
-            WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
-        if (!ime) {
-            flags = flags or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-        }
-        return flags
-    }
+            WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED or
+            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
 
     private fun statsCard(): LinearLayout {
         val card = card()
@@ -558,19 +298,6 @@ class BlockOverlay(
             letterSpacing = letter
             if (serif) typeface = Typeface.SERIF
             if (lineSpacing != 1f) setLineSpacing(0f, lineSpacing)
-        }
-    }
-
-    private fun chip(text: String, onClick: () -> Unit): TextView {
-        return TextView(service).apply {
-            this.text = text
-            gravity = Gravity.CENTER
-            setTextColor(MUTED)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-            isClickable = true
-            isFocusable = true
-            setPadding(dp(8), dp(10), dp(8), dp(10))
-            setOnClickListener { onClick() }
         }
     }
 

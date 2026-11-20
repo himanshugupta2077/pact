@@ -8,27 +8,13 @@ This slice:
 2. Set a per-app daily limit (minutes) and time window
 3. Block the app after the limit (AccessibilityService + full-screen cover)
 4. App groups with a shared daily limit and time window
-5. **Request override** — ask for 1–15 minutes with a comment. The request goes to the toolkit server. Approving it unlocks that app (or group) for the granted time.
+5. **No way to ask for more time.** A hit limit stays hit until the next day or the window opens.
 6. **Blocked websites** — sites such as youtube.com stay closed in Chrome, Brave, Firefox and other common browsers, so a banned app can't be opened in the browser instead. Edit the list on the setup screen.
 7. **Black and white** — the screen stays grey, with color during calls using the camera or showing WhatsApp remote video, in Brawl Stars, and in apps switched to "Keep in color" on their page.
 
-Limits, windows, groups and the server URL can be changed at any time.
+Limits, windows and groups can be changed at any time.
 
 Time spent staring at Pact’s lock overlay is not counted as app screen time, and blocked apps are muted while the overlay is up.
-
-## Override flow
-
-1. Hit a limit → lock screen → **Request override**
-2. Choose minutes (max 15) and write a comment → **Send request**
-3. On the reviewer's phone, open `/pact` (home tile **Pact**) and unlock with biometrics. First visit: bind that phone once in the browser.
-4. Approve with a custom duration, or deny
-5. The phone polls, applies a scoped unlock, and locks again when the time expires
-
-Groups use the same inbox. Approving a **group** request unlocks every app in that group.
-
-Default server: the `server` value in gitignored `pact.local.json`, baked in at build time. With no local file, set the URL under the gear / setup screen.
-
-If you are giving this APK to someone else, or standing up a reviewer on a new VPS, read **[PAIRING.md](PAIRING.md)** — a short explanation for the friend, then the exact API an AI can implement.
 
 ## Build
 
@@ -50,9 +36,7 @@ Pact uses it to turn the screen black and white and to switch its accessibility 
 1. Open **Pact**
 2. Grant **Usage access**
 3. Enable the **Pact** accessibility service
-4. On the reviewer's phone, open `https://<your-server>/pact/` and bind that phone once
-5. Set limits, windows, and groups
-6. To test override: Request override on the lock screen, then the reviewer approves at `/pact/`
+4. Set limits, windows, and groups
 
 Pact itself, the default launcher, Settings, phone/dialer, and the permission controller are never blocked so you can recover.
 
@@ -82,7 +66,7 @@ YouTube in a browser and the YouTube or JioHotstar apps use the same category na
 
 ## Nothing Phone
 
-Pact on the phone uploads today's foreground time every 5 minutes over Tailscale. The cable is not required. Tailscale on the phone has to be connected, the same as for an override request.
+Pact on the phone uploads today's foreground time every 5 minutes over Tailscale. The cable is not required. Tailscale on the phone has to be connected.
 
 The file is the second device under `activityRoot`, and `summary/<day>.json` adds it to the Mac. WhatsApp, Netflix, Instagram, YouTube, and YouTube Music use the same category names as the Mac. The upload URL and device id come from `pact.local.json` when you build the app.
 

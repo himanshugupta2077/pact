@@ -57,10 +57,6 @@ import app.pact.PactApp
 import app.pact.data.AppGroupWithMembers
 import app.pact.data.InstalledApp
 import app.pact.data.WindowMode
-import app.pact.override.OverridePhase
-import app.pact.override.OverrideSnapshot
-import app.pact.override.RequestKind
-import app.pact.ui.common.ApprovalCard
 import app.pact.ui.common.AppIcon
 import app.pact.ui.common.QuotaBar
 import app.pact.ui.common.DEFAULT_WINDOW_END
@@ -107,8 +103,6 @@ data class GroupEditState(
     val windowStartMinutes: Int = DEFAULT_WINDOW_START,
     val windowEndMinutes: Int = DEFAULT_WINDOW_END,
     val savedWindow: Boolean = false,
-    val groupAccess: OverrideSnapshot = OverrideSnapshot(OverridePhase.AVAILABLE),
-    val groupBlocked: Boolean = false,
 )
 
 class GroupEditViewModel(
@@ -136,8 +130,7 @@ class GroupEditViewModel(
         combine(installed, app.groups.observeAll(), missing, loaded, tick) { apps, groups, gone, ready, _ ->
             Catalog(apps, groups, gone, ready)
         },
-        app.overrides.records,
-    ) { form, window, catalog, _ ->
+    ) { form, window, catalog ->
         val otherByPkg = HashMap<String, String>()
         for (item in catalog.groups) {
             if (item.group.id == groupId) continue
@@ -170,13 +163,6 @@ class GroupEditViewModel(
             .toList()
         val limit = form.minutes.toIntOrNull() ?: 0
         val hasWindow = window.mode != WindowMode.NONE && window.start != window.end
-        val groupAccess = if (groupId != null) {
-            app.overrides.snapshot(RequestKind.GROUP, groupId)
-        } else {
-            OverrideSnapshot(OverridePhase.AVAILABLE, RequestKind.GROUP)
-        }
-        val groupBlocked = groupId != null &&
-            app.engine.groups().firstOrNull { it.id == groupId }?.let { app.engine.groupRestrictionHit(it) } == true
         GroupEditState(
             name = form.name,
             minutesText = form.minutes,
@@ -193,8 +179,6 @@ class GroupEditViewModel(
             windowStartMinutes = window.start,
             windowEndMinutes = window.end,
             savedWindow = window.saved,
-            groupAccess = groupAccess,
-            groupBlocked = groupBlocked,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GroupEditState())
 
@@ -289,12 +273,6 @@ class GroupEditViewModel(
         }
     }
 
-    suspend fun requestGroupAccess(minutes: Int, comment: String) {
-        val id = groupId ?: return
-        val label = name.value.trim().ifEmpty { "Group" }
-        app.overrides.submitGroup(id, label, minutes, comment)
-    }
-
     private data class Quad(
         val name: String,
         val minutes: String,
@@ -375,19 +353,6 @@ fun GroupEditScreen(
             modifier = Modifier.weight(1f),
             contentPadding = PaddingValues(bottom = 16.dp),
         ) {
-            if (groupId != null && (state.groupBlocked || state.groupAccess.phase != OverridePhase.AVAILABLE)) {
-                item(key = "group-access") {
-                    ApprovalCard(
-                        snapshot = state.groupAccess,
-                        modifier = Modifier.padding(horizontal = 24.dp),
-                        title = "Group access",
-                        body = "Unlock every app in this group for a few minutes.",
-                        requestLabel = "Request group access",
-                        oncePerDayHint = "Once a day per group.",
-                        onSubmit = vm::requestGroupAccess,
-                    )
-                }
-            }
             item(key = "form") {
                 OutlinedTextField(
                     value = state.name,

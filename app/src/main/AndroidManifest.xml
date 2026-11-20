@@ -50,16 +50,6 @@
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".BlockActivity"
-            android:excludeFromRecents="true"
-            android:exported="false"
-            android:launchMode="singleInstance"
-            android:screenOrientation="portrait"
-            android:taskAffinity="app.pact.block"
-            android:theme="@style/Theme.Pact.Block"
-            android:windowSoftInputMode="adjustResize" />
-
         <!-- Behind the payment shortcuts: switches accessibility and debugging off, then opens the app. -->
         <activity
             android:name=".PaymentLaunchActivity"

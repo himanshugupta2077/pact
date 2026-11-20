@@ -1,5 +1,4 @@
 {
-  "server": "https://pact.example",
   "uploadUrl": "http://pact.example:8765/activity",
   "phoneDeviceId": "",
   "phoneHostname": "",
