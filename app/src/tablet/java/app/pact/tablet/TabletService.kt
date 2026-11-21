@@ -54,6 +54,7 @@ class TabletService : Service() {
                 prefs.edit().remove("sleepDeadline").apply()
                 alarms.cancel(alarm(SLEEP))
                 wifi.setWifiEnabled(true)
+                getSystemService(BluetoothManager::class.java).adapter?.enable()
             } else scheduleRadioShutdown(true)
         }
     }
