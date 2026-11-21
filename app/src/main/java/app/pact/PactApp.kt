@@ -28,7 +28,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-class PactApp : Application() {
+open class PactApp : Application() {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     val db by lazy { PactDatabase.create(this) }
@@ -95,6 +95,10 @@ class PactApp : Application() {
                 delay(15_000)
             }
         }
+        startUploader()
+    }
+
+    protected open fun startUploader() {
         scope.launch {
             while (isActive) {
                 runCatching { PhoneShip(this@PactApp).uploadToday() }

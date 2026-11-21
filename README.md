@@ -97,3 +97,23 @@ cd /path/to/pact/menubar
 ```
 
 That builds `PactScreen.app`, copies it to `~/Applications`, and opens it. `build.sh` also writes `~/Library/Application Support/PactScreen/site.json` from `pact.local.json` when that file exists. The day follows `timezone` there, or the Mac's zone. A work laptop shows up in the same menu once its collector ships a day file.
+
+## Managed Android tablet
+
+The optional tablet build uses Pact as Android 13’s device owner. It turns Wi-Fi and Bluetooth off after five minutes with the screen off and turns Wi-Fi on at wake.
+
+NetGuard keeps the always-on VPN slot permanently, and Pact puts it back if anything else takes it. Reports do not use the Tailscale app. Pact runs its own userspace Tailscale node (`tablet/tsship`, built on `tsnet`), so it needs a NetGuard allow rule on Wi-Fi. About once an hour while Wi-Fi is up, it reads ActivityWatch’s local foreground-app bucket and posts to the private receiver through that node only. Unfinished earlier days are sent first. A failed attempt retries after 15 minutes.
+
+| Path | What |
+|---|---|
+| `app/src/tablet/` | Tablet build type: radio control, NetGuard enforcement, uploads |
+| `tablet/tsship/` | Go bridge to `tsnet`, built into `tablet/tsship/build/tsship.aar` |
+
+Build:
+
+```sh
+tablet/tsship/build.sh   # needs Go, gomobile and the Android NDK
+./gradlew -PpactTabletConfig=/path/to/private.json :app:assembleTablet
+```
+
+The private config supplies `uploadUrl` (the receiver’s numeric tailnet IPv4 address) and `phoneHostname`. The node joins the tailnet as `<phoneHostname>-pact`. On first run Pact shows a notification and logs a login link. Approve it, or put a pre-auth key in `files/ship/ts-authkey` before first run. Install over the existing tablet Pact app with the same signing key. The tablet uses its own `files/ship/device-id`, VPS bearer `files/ship/token` and ActivityWatch bearer `files/ship/aw-token`.

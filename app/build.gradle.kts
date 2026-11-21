@@ -7,8 +7,10 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
-fun pactLocal(): Map<*, *> {
-    val file = rootProject.file("pact.local.json")
+val tabletConfig = providers.gradleProperty("pactTabletConfig").orNull
+
+fun pactLocal(path: String): Map<*, *> {
+    val file = rootProject.file(path)
     if (!file.isFile) return emptyMap<String, Any>()
     val parsed = JsonSlurper().parse(file)
     return parsed as? Map<*, *> ?: emptyMap<String, Any>()
@@ -20,7 +22,7 @@ fun pactLocalText(local: Map<*, *>, key: String): String =
 fun asBuildConfigString(value: String): String =
     "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
-val pactLocalValues = pactLocal()
+val pactLocalValues = pactLocal("pact.local.json")
 
 android {
     namespace = "app.pact"
@@ -38,6 +40,20 @@ android {
     }
 
     buildTypes {
+        if (tabletConfig != null) {
+            create("tablet") {
+                initWith(getByName("debug"))
+                matchingFallbacks += "debug"
+                val values = pactLocal(tabletConfig)
+                buildConfigField("String", "SHIP_DEVICE_ID", asBuildConfigString(""))
+                mapOf("SHIP_UPLOAD_URL" to "uploadUrl",
+                    "SHIP_HOSTNAME" to "phoneHostname").forEach { (field, key) ->
+                    val value = pactLocalText(values, key)
+                    require(value.isNotBlank()) { "Missing tablet configuration field $key" }
+                    buildConfigField("String", field, asBuildConfigString(value))
+                }
+            }
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(
@@ -63,6 +79,12 @@ android {
 }
 
 dependencies {
+    if (tabletConfig != null) {
+        // Built by tablet/tsship/build.sh. Only the tablet build type links it.
+        val tsship = rootProject.file("tablet/tsship/build/tsship.aar")
+        require(tsship.isFile) { "Missing ${tsship.path}. Run tablet/tsship/build.sh first." }
+        add("tabletImplementation", files(tsship))
+    }
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
