@@ -2,7 +2,7 @@ package app.pact.data
 
 import kotlinx.coroutines.flow.Flow
 
-class RuleRepository(private val dao: AppRuleDao) {
+class RuleRepository(private val dao: AppRuleDao, private val lock: EditLock) {
     fun observeAll(): Flow<List<AppRule>> = dao.observeAll()
     fun observe(pkg: String): Flow<AppRule?> = dao.observe(pkg)
     suspend fun get(pkg: String): AppRule? = dao.get(pkg)
@@ -30,6 +30,7 @@ class RuleRepository(private val dao: AppRuleDao) {
     }
 
     suspend fun clear(packageName: String) {
+        if (!lock.isUnlocked()) return
         dao.delete(packageName)
     }
 
@@ -38,6 +39,7 @@ class RuleRepository(private val dao: AppRuleDao) {
     }
 
     private suspend fun persist(rule: AppRule) {
+        if (!lock.isUnlocked()) return
         val next = rule.copy(updatedAt = System.currentTimeMillis(), forceState = ForceState.NONE.name)
         if (next.isBlank) dao.delete(next.packageName) else dao.upsert(next)
     }

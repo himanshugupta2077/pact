@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
+import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityWindowInfo
@@ -25,11 +26,13 @@ class PactAccessibilityService : AccessibilityService() {
     private lateinit var overlay: BlockOverlay
     private lateinit var media: MediaSilencer
     private lateinit var sites: SiteBlocker
+    private lateinit var pill: TimeLeftPill
 
     private var covering: String? = null
     private var coverUsage: String? = null
     private var lastEnforceUptime = 0L
     private var lastSilenceUptime = 0L
+    private var lastSettingsScanUptime = 0L
     private var hideScheduled = false
     private val busyCameras = mutableSetOf<String>()
     private val cameraCallback = object : CameraManager.AvailabilityCallback() {
@@ -63,6 +66,7 @@ class PactAccessibilityService : AccessibilityService() {
         overlay = BlockOverlay(this) { goHome() }
         media = (application as? PactApp)?.media ?: MediaSilencer(this)
         sites = SiteBlocker(this)
+        pill = TimeLeftPill(this)
         getSystemService(CameraManager::class.java)?.registerAvailabilityCallback(cameraCallback, handler)
         seedScreen()
         handler.removeCallbacks(tick)
@@ -129,6 +133,7 @@ class PactAccessibilityService : AccessibilityService() {
         covering = null
         (application as? PactApp)?.engine?.setCovering(null)
         if (::overlay.isInitialized) overlay.hide()
+        if (::pill.isInitialized) pill.hide()
         if (::media.isInitialized) media.release()
         super.onDestroy()
     }
@@ -153,8 +158,10 @@ class PactAccessibilityService : AccessibilityService() {
         updateGrayscale(app, top)
         if (getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true) {
             app.engine.setCovering(null)
+            pill.hide()
             return
         }
+        if (top == SETTINGS && guardSettings(app)) return
 
         val popups = noteForeground(app)
 
@@ -164,6 +171,7 @@ class PactAccessibilityService : AccessibilityService() {
         }
 
         if (blockedHit != null) {
+            pill.hide()
             cancelHide()
             val first = covering != blockedHit
             covering = blockedHit
@@ -214,6 +222,43 @@ class PactAccessibilityService : AccessibilityService() {
         if (overlay.shownPackage != null) overlay.hide()
         app.engine.setCovering(null)
         silenceIfDue(app, visible = false)
+        pill.update(top, app.engine)
+    }
+
+    /**
+     * Closes the Settings pages that could switch Pact off: its App info (Uninstall), device
+     * admin, usage access, notification access and accessibility pages. They open while
+     * the Mac has settings unlocked.
+     */
+    private fun guardSettings(app: PactApp): Boolean {
+        if (app.lock.isUnlocked()) return false
+        val now = SystemClock.uptimeMillis()
+        if (now - lastSettingsScanUptime < 400L) return false
+        lastSettingsScanUptime = now
+        val texts = ArrayList<String>()
+        for (window in windows.orEmpty()) {
+            if (window.type != AccessibilityWindowInfo.TYPE_APPLICATION) continue
+            val root = window.root ?: continue
+            if (root.packageName?.toString() == SETTINGS) collectText(root, texts)
+        }
+        val label = app.installed.labelOf(packageName)
+        val toggle = texts.any { it == "Use $label" }
+        val aboutPact = texts.any { it == label }
+        val risky = texts.any { text -> GUARDED_PAGES.any { text.contains(it, ignoreCase = true) } }
+        if (!toggle && !(aboutPact && risky)) return false
+        Log.i("Pact", "closed a Settings page that switches Pact off")
+        performGlobalAction(GLOBAL_ACTION_HOME)
+        return true
+    }
+
+    private fun collectText(node: AccessibilityNodeInfo, out: MutableList<String>) {
+        if (out.size > 400) return
+        node.text?.toString()?.let { out.add(it) }
+        node.contentDescription?.toString()?.let { out.add(it) }
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            collectText(child, out)
+        }
     }
 
     /** Remote video also qualifies when our own camera is off. */
@@ -409,5 +454,13 @@ class PactAccessibilityService : AccessibilityService() {
         if (pkg.startsWith("com.android.systemui")) return true
         if (pkg.contains("quickstep", ignoreCase = true)) return true
         return false
+    }
+
+    companion object {
+        private const val SETTINGS = "com.android.settings"
+
+        /** Text on the Settings pages that, next to Pact's name, can switch it off. */
+        private val GUARDED_PAGES =
+            listOf("uninstall", "force stop", "admin app", "usage data", "notification read")
     }
 }

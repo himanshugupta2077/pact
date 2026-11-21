@@ -11,8 +11,9 @@ This slice:
 5. **No way to ask for more time.** A hit limit stays hit until the next day or the window opens.
 6. **Blocked websites** — sites such as youtube.com stay closed in Chrome, Brave, Firefox and other common browsers, so a banned app can't be opened in the browser instead. Edit the list on the setup screen.
 7. **Black and white** — the screen stays grey, with color during calls using the camera or showing WhatsApp remote video, in Brawl Stars, and in apps switched to "Keep in color" on their page.
-
-Limits, windows and groups can be changed at any time.
+8. **Time-left pill** — a small "8m left · 12m of 20m" chip at the top of a limited app when it opens and at 10, 5 and 1 minutes left. It fades after 3 seconds; a tap or swipe dismisses it.
+9. **Locked settings** — limits, windows, groups, sites, colors and payment apps are read-only on the phone. They unlock only from a computer over USB (below).
+10. **Can't be uninstalled** — Pact is a device admin, so uninstalling and Force stop fail. Pact closes the Settings pages that would switch it off (its App info, device admin, usage access, notification access and accessibility pages), turns its accessibility service back on as soon as it goes off, keeps automatic date and time on, and turns Wireless debugging off.
 
 Time spent staring at Pact’s lock overlay is not counted as app screen time, and blocked apps are muted while the overlay is up.
 
@@ -36,7 +37,21 @@ Pact uses it to turn the screen black and white and to switch its accessibility 
 1. Open **Pact**
 2. Grant **Usage access**
 3. Enable the **Pact** accessibility service
-4. Set limits, windows, and groups
+4. Set limits, windows, and groups (unlock first, below)
+5. Switch on the device admin from the Mac: `adb shell dpm set-active-admin app.pact/.enforce.PactAdmin`
+
+## Changing settings
+
+Plug the phone into the Mac with USB debugging on, then:
+
+```bash
+tools/pact-unlock        # unlock for 15 minutes (or: tools/pact-unlock 30, max 60)
+tools/pact-unlock lock   # lock again now
+tools/pact-unlock status
+tools/pact-unlock release  # drop the device admin so `adb uninstall app.pact` works
+```
+
+The unlock is refused unless the phone is plugged in with USB debugging on, and it ends on reboot.
 
 Pact itself, the default launcher, Settings, phone/dialer, and the permission controller are never blocked so you can recover.
 

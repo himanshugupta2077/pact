@@ -1,0 +1,23 @@
+#!/bin/bash
+# Unlock Pact's settings on the phone over USB, or lock them again.
+#   pact-unlock [minutes]   unlock for 15 minutes, or the given number (max 60)
+#   pact-unlock lock        lock now
+#   pact-unlock status      show lock and device admin state
+#   pact-unlock release     switch off the device admin so `adb uninstall app.pact` works
+set -euo pipefail
+
+case "${1:-15}" in
+  lock) action=LOCK; extra=() ;;
+  status) action=STATUS; extra=() ;;
+  release) action=RELEASE_ADMIN; extra=() ;;
+  *[!0-9]*) sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) action=UNLOCK; extra=(--ei minutes "${1:-15}") ;;
+esac
+
+if ! adb get-state >/dev/null 2>&1; then
+  echo "No phone over USB. Plug it in and allow USB debugging." >&2
+  exit 1
+fi
+
+out=$(adb shell am broadcast -n app.pact/.enforce.UsbControl -a "app.pact.$action" ${extra[@]+"${extra[@]}"})
+echo "$out" | sed -n 's/.*data="\(.*\)"/\1/p' | grep . || echo "$out"

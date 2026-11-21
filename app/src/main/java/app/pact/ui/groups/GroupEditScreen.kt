@@ -58,12 +58,14 @@ import app.pact.data.AppGroupWithMembers
 import app.pact.data.InstalledApp
 import app.pact.data.WindowMode
 import app.pact.ui.common.AppIcon
-import app.pact.ui.common.QuotaBar
 import app.pact.ui.common.DEFAULT_WINDOW_END
 import app.pact.ui.common.DEFAULT_WINDOW_START
+import app.pact.ui.common.LockedNote
 import app.pact.ui.common.PresetChip
+import app.pact.ui.common.QuotaBar
 import app.pact.ui.common.TimeWindowCard
 import app.pact.ui.common.pickTime
+import app.pact.ui.common.rememberUnlocked
 import app.pact.ui.common.windowRuleLabel
 import app.pact.ui.theme.Danger
 import app.pact.ui.theme.Paper
@@ -322,6 +324,7 @@ fun GroupEditScreen(
     val scheme = MaterialTheme.colorScheme
     val context = LocalContext.current
     val presets = listOf(15, 30, 45, 60, 90)
+    val unlocked = rememberUnlocked()
 
     LaunchedEffect(state.missing) {
         if (state.missing) onBack()
@@ -343,7 +346,11 @@ fun GroupEditScreen(
                 )
             }
             Text(
-                if (groupId != null) "Edit group" else "New group",
+                when {
+                    !unlocked -> state.name.ifBlank { "Group" }
+                    groupId != null -> "Edit group"
+                    else -> "New group"
+                },
                 style = MaterialTheme.typography.titleLarge,
                 color = scheme.onBackground,
             )
@@ -354,6 +361,9 @@ fun GroupEditScreen(
             contentPadding = PaddingValues(bottom = 16.dp),
         ) {
             item(key = "form") {
+                if (!unlocked) {
+                    LockedNote(Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+                } else {
                 OutlinedTextField(
                     value = state.name,
                     onValueChange = vm::onName,
@@ -364,6 +374,7 @@ fun GroupEditScreen(
                     shape = RoundedCornerShape(14.dp),
                     colors = pactFieldColors(),
                 )
+                }
                 if (state.members.isNotEmpty()) {
                     Text(
                         if (state.members.size == 1) "In this group · 1 app" else "In this group · ${state.members.size} apps",
@@ -394,9 +405,10 @@ fun GroupEditScreen(
                         )
                     }
                     state.members.forEach { row ->
-                        PickerRow(row, onToggle = { vm.toggle(row.packageName) })
+                        PickerRow(row, enabled = unlocked, onToggle = { vm.toggle(row.packageName) })
                     }
                 }
+                if (unlocked) {
                 Text(
                     "Daily limit",
                     style = MaterialTheme.typography.titleLarge,
@@ -470,11 +482,12 @@ fun GroupEditScreen(
                     shape = RoundedCornerShape(14.dp),
                     colors = pactFieldColors(),
                 )
+                }
             }
-            items(state.apps, key = { it.packageName }) { row ->
+            if (unlocked) items(state.apps, key = { it.packageName }) { row ->
                 PickerRow(row, onToggle = { vm.toggle(row.packageName) })
             }
-            if (state.apps.isEmpty()) {
+            if (unlocked && state.apps.isEmpty()) {
                 item(key = "no-apps") {
                     Text(
                         if (state.query.isBlank()) "No apps to add" else "No matching apps",
@@ -486,6 +499,7 @@ fun GroupEditScreen(
             }
         }
 
+        if (unlocked) {
         Button(
             onClick = { vm.save(onBack) },
             modifier = Modifier
@@ -510,6 +524,7 @@ fun GroupEditScreen(
             )
         } else {
             Spacer(Modifier.height(12.dp))
+        }
         }
     }
 
@@ -539,12 +554,12 @@ fun GroupEditScreen(
 }
 
 @Composable
-private fun PickerRow(row: PickerApp, onToggle: () -> Unit) {
+private fun PickerRow(row: PickerApp, enabled: Boolean = true, onToggle: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onToggle)
+            .clickable(enabled = enabled, onClick = onToggle)
             .padding(horizontal = 20.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

@@ -43,7 +43,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import app.pact.PactApp
 import app.pact.data.WindowMode
 import app.pact.ui.common.AppIcon
+import app.pact.ui.common.LockedNote
 import app.pact.ui.common.QuotaBar
+import app.pact.ui.common.rememberUnlocked
 import app.pact.ui.theme.Paper
 import app.pact.ui.theme.Rust
 import app.pact.ui.theme.Sage
@@ -176,7 +178,9 @@ fun GroupListScreen(
             }
         }
 
-        Button(
+        if (!rememberUnlocked()) {
+            LockedNote(Modifier.padding(horizontal = 20.dp, vertical = 16.dp))
+        } else Button(
             onClick = onNewGroup,
             modifier = Modifier
                 .fillMaxWidth()

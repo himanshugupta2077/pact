@@ -53,11 +53,13 @@ import app.pact.data.WindowMode
 import app.pact.ui.common.AppIcon
 import app.pact.ui.common.DEFAULT_WINDOW_END
 import app.pact.ui.common.DEFAULT_WINDOW_START
+import app.pact.ui.common.LockedNote
 import app.pact.ui.common.PresetChip
-import app.pact.ui.common.TimeWindowCard
-import app.pact.ui.common.pickTime
 import app.pact.ui.common.QuotaBar
 import app.pact.ui.common.SwitchRow
+import app.pact.ui.common.TimeWindowCard
+import app.pact.ui.common.pickTime
+import app.pact.ui.common.rememberUnlocked
 import app.pact.ui.common.windowRuleLabel
 import app.pact.ui.theme.Paper
 import app.pact.ui.theme.Rust
@@ -223,7 +225,8 @@ fun AppDetailScreen(
     val context = LocalContext.current
     val presets = listOf(15, 30, 45, 60, 90)
     val limitMinutes = minutesText.toIntOrNull() ?: 0
-    val editable = state.canEdit
+    val unlocked = rememberUnlocked()
+    val editable = state.canEdit && unlocked
     val usedHint = when {
         state.protectedApp -> "This app cannot be blocked (recovery / system)."
         state.blocked && (state.remainingMs ?: 1L) <= 0L &&
@@ -344,6 +347,12 @@ fun AppDetailScreen(
             )
         }
 
+        if (!unlocked) {
+            Spacer(Modifier.height(16.dp))
+            LockedNote(Modifier.padding(horizontal = 24.dp))
+        }
+
+        if (editable) {
         Spacer(Modifier.height(20.dp))
         Text(
             "Daily limit",
@@ -422,6 +431,7 @@ fun AppDetailScreen(
                 vm.saveWindow(WindowMode.NONE, 0, 0)
             },
         )
+        }
 
         Spacer(Modifier.height(12.dp))
         SwitchRow(
@@ -429,6 +439,7 @@ fun AppDetailScreen(
             body = "Black and white is off while this app is open.",
             checked = state.keepInColor,
             onChange = vm::setKeepInColor,
+            enabled = unlocked,
             modifier = Modifier.padding(horizontal = 24.dp),
         )
 
@@ -439,6 +450,7 @@ fun AppDetailScreen(
                 "works. They come back when you leave. Up to 20 minutes at a time, 30 a day.",
             checked = state.paymentApp,
             onChange = vm::setPaymentApp,
+            enabled = unlocked,
             modifier = Modifier.padding(horizontal = 24.dp),
         )
     }

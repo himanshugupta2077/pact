@@ -26,6 +26,13 @@ import kotlin.coroutines.coroutineContext
 object BankMode {
     private const val TAG = "PactBank"
 
+    private val SYSTEM_SETTINGS = setOf(
+        "com.android.settings",
+        "com.android.packageinstaller",
+        "com.google.android.packageinstaller",
+        "com.android.permissioncontroller",
+        "com.google.android.permissioncontroller",
+    )
     private const val SESSION_CAP_MS = 20 * 60_000L
     private const val DAILY_BUDGET_MS = 30 * 60_000L
     private const val COOLDOWN_MS = 10 * 60_000L
@@ -181,6 +188,8 @@ object BankMode {
                 now - started >= SESSION_CAP_MS -> "20 minute cap"
                 usedToday(prefs, now) + (now - started) >= DAILY_BUDGET_MS -> "30 minutes used today"
                 front != null && app.engine.shouldBlock(front) -> "blocked app $front"
+                // Pact's own pages there are only guarded while accessibility is on.
+                front in SYSTEM_SETTINGS -> "opened $front"
                 stays -> null
                 else -> {
                     if (awaySince == 0L) awaySince = now

@@ -79,6 +79,31 @@
             </intent-filter>
         </receiver>
 
+        <receiver
+            android:name=".enforce.PactAdmin"
+            android:exported="true"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Unlock and admin commands from the Mac. Only the adb shell holds DUMP. -->
+        <receiver
+            android:name=".enforce.UsbControl"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="app.pact.UNLOCK" />
+                <action android:name="app.pact.LOCK" />
+                <action android:name="app.pact.RELEASE_ADMIN" />
+                <action android:name="app.pact.STATUS" />
+            </intent-filter>
+        </receiver>
+
         <service
             android:name=".enforce.PactNotificationListener"
             android:exported="true"

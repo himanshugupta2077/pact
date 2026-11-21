@@ -165,6 +165,39 @@ class RuleEngine(
         }
     }
 
+    /** Used and limit in ms for whichever of the app's own and its group's limit runs out first. */
+    fun quota(packageName: String): Pair<Long, Long>? {
+        if (isProtected(packageName)) return null
+        val rule = rules[packageName]
+        val own = if (rule != null && rule.hasLimit) {
+            usedMs(packageName) to rule.dailyLimitMinutes * 60_000L
+        } else {
+            null
+        }
+        val group = groupFor(packageName)
+        val shared = if (group != null && group.hasLimit) {
+            groupUsedMs(group) to group.dailyLimitMinutes * 60_000L
+        } else {
+            null
+        }
+        return listOfNotNull(own, shared).minByOrNull { (used, limit) -> limit - used }
+    }
+
+    /** Time until the app's or its group's time window blocks it, or null when none does. */
+    fun msUntilWindow(packageName: String, now: Long = System.currentTimeMillis()): Long? {
+        val rule = rules[packageName]
+        val group = groupFor(packageName)
+        if (rule?.hasWindow != true && group?.hasWindow != true) return null
+        val nowMinutes = minutesOfDay(now)
+        for (ahead in 1..24 * 60) {
+            val minute = (nowMinutes + ahead) % (24 * 60)
+            if (rule?.blocksAt(minute) == true || group?.blocksAt(minute) == true) {
+                return ahead * 60_000L - now % 60_000L
+            }
+        }
+        return null
+    }
+
     fun groupUsedMs(group: GroupRule): Long {
         var total = 0L
         for (pkg in group.packages) total += usedMs(pkg)

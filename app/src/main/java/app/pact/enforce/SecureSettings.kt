@@ -51,6 +51,40 @@ object SecureSettings {
     }
 
     /**
+     * On-phone adb (Shizuku, LADB) runs over Wireless debugging and could unlock settings
+     * without the Mac. USB debugging stays as it is. Returns true when it was on.
+     */
+    fun disableWirelessDebugging(context: Context): Boolean {
+        if (!canWrite(context)) return false
+        val resolver = context.contentResolver
+        if (Settings.Global.getInt(resolver, ADB_WIFI_ENABLED, 0) == 0) return false
+        return runCatching { Settings.Global.putInt(resolver, ADB_WIFI_ENABLED, 0) }.isSuccess
+    }
+
+    /** Setting the clock or time zone ahead would start a new day and reset every limit. */
+    fun keepAutomaticTime(context: Context): Boolean {
+        if (!canWrite(context)) return false
+        val resolver = context.contentResolver
+        var changed = false
+        for (key in listOf(Settings.Global.AUTO_TIME, Settings.Global.AUTO_TIME_ZONE)) {
+            if (Settings.Global.getInt(resolver, key, 1) == 1) continue
+            changed = runCatching { Settings.Global.putInt(resolver, key, 1) }.isSuccess || changed
+        }
+        return changed
+    }
+
+    private const val ADB_WIFI_ENABLED = "adb_wifi_enabled"
+
+    /** Settings that [PactApp] watches and puts back as soon as they change. */
+    val WATCHED = listOf(
+        Settings.Secure.getUriFor(Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES),
+        Settings.Secure.getUriFor(Settings.Secure.ACCESSIBILITY_ENABLED),
+        Settings.Global.getUriFor(ADB_WIFI_ENABLED),
+        Settings.Global.getUriFor(Settings.Global.AUTO_TIME),
+        Settings.Global.getUriFor(Settings.Global.AUTO_TIME_ZONE),
+    )
+
+    /**
      * Force-stopping or reinstalling Pact removes its accessibility service from the
      * enabled list. Put it back. Returns true when it had to.
      */

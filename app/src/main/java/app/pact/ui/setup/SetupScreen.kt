@@ -50,7 +50,9 @@ import androidx.core.net.toUri
 import app.pact.PactApp
 import app.pact.enforce.PactNotificationListener
 import app.pact.enforce.SecureSettings
+import app.pact.ui.common.LockedNote
 import app.pact.ui.common.SwitchRow
+import app.pact.ui.common.rememberUnlocked
 import app.pact.ui.theme.Paper
 import app.pact.ui.theme.Rust
 import app.pact.ui.theme.Sage
@@ -71,6 +73,7 @@ fun SetupScreen(
     val sites by app.focus.blockedSites.collectAsStateWithLifecycle()
     val canWriteSecure = remember { SecureSettings.canWrite(context) }
     var siteDraft by remember { mutableStateOf("") }
+    val unlocked = rememberUnlocked()
 
     Column(
         modifier = Modifier
@@ -177,7 +180,7 @@ fun SetupScreen(
                 "Needs one permission from a computer first: ${SecureSettings.GRANT_COMMAND}"
             },
             checked = grayscale && canWriteSecure,
-            enabled = canWriteSecure,
+            enabled = canWriteSecure && unlocked,
             onChange = { on ->
                 app.focus.setGrayscale(on)
                 if (!on) SecureSettings.setGrayscale(context, false)
@@ -204,13 +207,17 @@ fun SetupScreen(
                     color = scheme.onBackground,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = { app.focus.removeSite(host) }) {
-                    Text("Remove", color = scheme.onSurfaceVariant)
+                if (unlocked) {
+                    TextButton(onClick = { app.focus.removeSite(host) }) {
+                        Text("Remove", color = scheme.onSurfaceVariant)
+                    }
                 }
             }
         }
         Spacer(Modifier.height(8.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        if (!unlocked) {
+            LockedNote()
+        } else Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = siteDraft,
                 onValueChange = { siteDraft = it.take(100) },
@@ -232,6 +239,8 @@ fun SetupScreen(
             }
         }
 
+        // While locked, the accessibility service closes Pact's App info anyway.
+        if (unlocked) {
         Spacer(Modifier.height(28.dp))
         TextButton(
             onClick = {
@@ -242,6 +251,7 @@ fun SetupScreen(
             modifier = Modifier.align(Alignment.CenterHorizontally),
         ) {
             Text("App info", color = scheme.onSurfaceVariant)
+        }
         }
     }
 }

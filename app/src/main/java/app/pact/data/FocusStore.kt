@@ -5,7 +5,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /** Black-and-white screen, blocked websites and payment apps. */
-class FocusStore(context: Context) {
+class FocusStore(context: Context, private val lock: EditLock) {
     private val prefs = context.getSharedPreferences("pact_focus", Context.MODE_PRIVATE)
 
     private val _grayscale = MutableStateFlow(prefs.getBoolean(KEY_GRAYSCALE, false))
@@ -30,12 +30,14 @@ class FocusStore(context: Context) {
     val paymentApps: StateFlow<Set<String>> = _paymentApps
 
     fun setGrayscale(on: Boolean) {
+        if (!lock.isUnlocked()) return
         prefs.edit().putBoolean(KEY_GRAYSCALE, on).apply()
         _grayscale.value = on
     }
 
     @Synchronized
     fun setKeepInColor(packageName: String, on: Boolean) {
+        if (!lock.isUnlocked()) return
         val next = if (on) _colorApps.value + packageName else _colorApps.value - packageName
         prefs.edit().putStringSet(KEY_COLOR_APPS, next).apply()
         _colorApps.value = next
@@ -43,6 +45,7 @@ class FocusStore(context: Context) {
 
     @Synchronized
     fun setPaymentApp(packageName: String, on: Boolean) {
+        if (!lock.isUnlocked()) return
         val next = if (on) _paymentApps.value + packageName else _paymentApps.value - packageName
         prefs.edit().putStringSet(KEY_PAYMENT_APPS, next).apply()
         _paymentApps.value = next
@@ -51,6 +54,7 @@ class FocusStore(context: Context) {
     /** Returns the stored host, or null when [raw] is not a usable domain. */
     @Synchronized
     fun addSite(raw: String): String? {
+        if (!lock.isUnlocked()) return null
         val host = hostOf(raw) ?: return null
         if (!host.contains('.')) return null
         val next = _blockedSites.value + host
@@ -61,6 +65,7 @@ class FocusStore(context: Context) {
 
     @Synchronized
     fun removeSite(host: String) {
+        if (!lock.isUnlocked()) return
         val next = _blockedSites.value - host
         prefs.edit().putStringSet(KEY_SITES, next).apply()
         _blockedSites.value = next

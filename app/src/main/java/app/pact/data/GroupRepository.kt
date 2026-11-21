@@ -3,7 +3,7 @@ package app.pact.data
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
 
-class GroupRepository(private val dao: AppGroupDao) {
+class GroupRepository(private val dao: AppGroupDao, private val lock: EditLock) {
     fun observeAll(): Flow<List<AppGroupWithMembers>> = dao.observeAll()
     fun observe(id: String): Flow<AppGroupWithMembers?> = dao.observe(id)
     suspend fun get(id: String): AppGroupWithMembers? = dao.get(id)
@@ -17,7 +17,8 @@ class GroupRepository(private val dao: AppGroupDao) {
         windowMode: WindowMode = WindowMode.NONE,
         windowStartMinutes: Int = 0,
         windowEndMinutes: Int = 0,
-    ): String {
+    ): String? {
+        if (!lock.isUnlocked()) return null
         val groupId = id?.takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString()
         val group = AppGroup(
             id = groupId,
@@ -37,6 +38,7 @@ class GroupRepository(private val dao: AppGroupDao) {
     }
 
     suspend fun delete(id: String) {
+        if (!lock.isUnlocked()) return
         dao.deleteGroup(id)
     }
 }
