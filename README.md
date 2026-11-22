@@ -100,7 +100,7 @@ That builds `PactScreen.app`, copies it to `~/Applications`, and opens it. `buil
 
 ## Managed Android tablet
 
-The optional tablet build uses Pact as Android 13’s device owner. It turns Wi-Fi and Bluetooth off after five minutes with the screen off and turns both back on at wake.
+The optional tablet build uses Pact as Android 13’s device owner. It turns Wi-Fi and Bluetooth off after five minutes with the screen off. At wake it turns back on only the ones it switched off; a radio that was already off stays off.
 
 NetGuard keeps the always-on VPN slot permanently, and Pact puts it back if anything else takes it. Reports do not use the Tailscale app. Pact runs its own userspace Tailscale node (`tablet/tsship`, built on `tsnet`), so it needs a NetGuard allow rule on Wi-Fi. About once an hour while Wi-Fi is up, it reads ActivityWatch’s local foreground-app bucket and posts to the private receiver through that node only. Unfinished earlier days are sent first. A failed attempt retries after 15 minutes.
 

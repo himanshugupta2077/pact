@@ -32,6 +32,7 @@ class TabletService : Service() {
     private val policy by lazy { getSystemService(DevicePolicyManager::class.java) }
     private val admin by lazy { PactAdmin.component(this) }
     private val wifi by lazy { applicationContext.getSystemService(WifiManager::class.java) }
+    private val bluetooth by lazy { getSystemService(BluetoothManager::class.java).adapter }
     private val power by lazy { getSystemService(PowerManager::class.java) }
     private val alarms by lazy { getSystemService(AlarmManager::class.java) }
     private val connectivity by lazy { getSystemService(ConnectivityManager::class.java) }
@@ -60,8 +61,10 @@ class TabletService : Service() {
             if (intent.action == Intent.ACTION_SCREEN_ON) {
                 prefs.edit().remove("sleepDeadline").apply()
                 alarms.cancel(alarm(SLEEP))
-                wifi.setWifiEnabled(true)
-                getSystemService(BluetoothManager::class.java).adapter?.enable()
+                // Only bring back what Pact itself switched off at sleep.
+                if (prefs.getBoolean(RESTORE_WIFI, false)) wifi.setWifiEnabled(true)
+                if (prefs.getBoolean(RESTORE_BT, false)) bluetooth?.enable()
+                prefs.edit().remove(RESTORE_WIFI).remove(RESTORE_BT).apply()
             } else scheduleRadioShutdown(true)
         }
     }
@@ -153,8 +156,13 @@ class TabletService : Service() {
                 upload = scope.launch { sync() }
             }
             SLEEP -> if (!power.isInteractive && SystemClock.elapsedRealtime() >= prefs.getLong("sleepDeadline", Long.MAX_VALUE)) {
+                // Remember which radios were on, so wake restores only those. A radio already off stays off.
+                prefs.edit()
+                    .putBoolean(RESTORE_WIFI, prefs.getBoolean(RESTORE_WIFI, false) || wifi.isWifiEnabled)
+                    .putBoolean(RESTORE_BT, prefs.getBoolean(RESTORE_BT, false) || bluetooth?.isEnabled == true)
+                    .apply()
                 wifi.setWifiEnabled(false)
-                getSystemService(BluetoothManager::class.java).adapter?.disable()
+                bluetooth?.disable()
             }
         }
         return START_STICKY
@@ -172,6 +180,8 @@ class TabletService : Service() {
     companion object {
         private const val FIREWALL = "eu.faircode.netguard"
         private const val SLEEP = "tablet.sleep"
+        private const val RESTORE_WIFI = "restoreWifi"
+        private const val RESTORE_BT = "restoreBluetooth"
         const val SYNC_NOW = "app.pact.tablet.SYNC_NOW"
         private const val HOUR = 3_600_000L
         private const val LOGIN_NOTICE = 5407
