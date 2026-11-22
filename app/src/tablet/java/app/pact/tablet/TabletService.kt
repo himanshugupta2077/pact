@@ -21,6 +21,13 @@ class TabletApp : PactApp() {
     }
 }
 
+/** `adb shell am broadcast -a app.pact.tablet.SYNC_NOW -n app.pact/.tablet.SyncNow` uploads at once. */
+class SyncNow : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        context.startForegroundService(Intent(context, TabletService::class.java).setAction(TabletService.SYNC_NOW))
+    }
+}
+
 class TabletService : Service() {
     private val policy by lazy { getSystemService(DevicePolicyManager::class.java) }
     private val admin by lazy { PactAdmin.component(this) }
@@ -141,6 +148,10 @@ class TabletService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
+            SYNC_NOW -> if (upload?.isActive != true) {
+                prefs.edit().remove("retry").remove("lastOk").apply()
+                upload = scope.launch { sync() }
+            }
             SLEEP -> if (!power.isInteractive && SystemClock.elapsedRealtime() >= prefs.getLong("sleepDeadline", Long.MAX_VALUE)) {
                 wifi.setWifiEnabled(false)
                 getSystemService(BluetoothManager::class.java).adapter?.disable()
@@ -161,6 +172,7 @@ class TabletService : Service() {
     companion object {
         private const val FIREWALL = "eu.faircode.netguard"
         private const val SLEEP = "tablet.sleep"
+        const val SYNC_NOW = "app.pact.tablet.SYNC_NOW"
         private const val HOUR = 3_600_000L
         private const val LOGIN_NOTICE = 5407
         const val TAG = "PactTablet"
