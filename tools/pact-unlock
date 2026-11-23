@@ -2,15 +2,22 @@
 # Unlock Pact's settings on the phone over USB, or lock them again.
 #   pact-unlock [minutes]   unlock for 15 minutes, or the given number (max 60)
 #   pact-unlock lock        lock now
+#   pact-unlock reset-today   start today's counted time over at zero for every app and group
+#   pact-unlock allow-site <site>...   stop blocking sites (youtube.com, instagram.com) in browsers
 #   pact-unlock status      show lock and device admin state
 #   pact-unlock release     switch off the device admin so `adb uninstall app.pact` works
 set -euo pipefail
 
 case "${1:-15}" in
   lock) action=LOCK; extra=() ;;
+  reset-today) action=RESET_TODAY; extra=() ;;
+  allow-site)
+    shift
+    [ $# -gt 0 ] || { echo "Usage: pact-unlock allow-site <site>..." >&2; exit 2; }
+    action=ALLOW_SITE; extra=(--es sites "$(IFS=,; echo "$*")") ;;
   status) action=STATUS; extra=() ;;
   release) action=RELEASE_ADMIN; extra=() ;;
-  *[!0-9]*) sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *[!0-9]*) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
   *) action=UNLOCK; extra=(--ei minutes "${1:-15}") ;;
 esac
 

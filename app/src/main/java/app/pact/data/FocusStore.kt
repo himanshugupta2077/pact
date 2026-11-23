@@ -64,8 +64,8 @@ class FocusStore(context: Context, private val lock: EditLock) {
     }
 
     @Synchronized
-    fun removeSite(host: String) {
-        if (!lock.isUnlocked()) return
+    fun removeSite(host: String, bypassLock: Boolean = false) {
+        if (!bypassLock && !lock.isUnlocked()) return
         val next = _blockedSites.value - host
         prefs.edit().putStringSet(KEY_SITES, next).apply()
         _blockedSites.value = next

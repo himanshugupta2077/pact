@@ -99,6 +99,8 @@
             <intent-filter>
                 <action android:name="app.pact.UNLOCK" />
                 <action android:name="app.pact.LOCK" />
+                <action android:name="app.pact.RESET_TODAY" />
+                <action android:name="app.pact.ALLOW_SITE" />
                 <action android:name="app.pact.RELEASE_ADMIN" />
                 <action android:name="app.pact.STATUS" />
             </intent-filter>

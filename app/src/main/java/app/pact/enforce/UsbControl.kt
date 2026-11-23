@@ -8,6 +8,7 @@ import android.os.BatteryManager
 import android.provider.Settings
 import android.util.Log
 import app.pact.PactApp
+import app.pact.data.FocusStore
 
 /**
  * Commands from the Mac over adb (tools/pact-unlock). The receiver needs the DUMP
@@ -26,6 +27,30 @@ class UsbControl : BroadcastReceiver() {
                 val minutes = intent.getIntExtra("minutes", 15)
                 app.lock.unlock(minutes)
                 "unlocked for ${app.lock.remainingMs() / 60_000L + 1} min"
+            }
+            ACTION_RESET_TODAY -> {
+                if (!usbConnected(context)) {
+                    resultData = "refused: the phone is not plugged in with USB debugging on"
+                    return
+                }
+                val cleared = app.usage.resetToday()
+                if (cleared == null) {
+                    "usage access is off; nothing reset"
+                } else {
+                    app.engine.refreshUsage(force = true)
+                    "today's time reset ($cleared apps cleared)"
+                }
+            }
+            ACTION_ALLOW_SITE -> {
+                if (!usbConnected(context)) {
+                    resultData = "refused: the phone is not plugged in with USB debugging on"
+                    return
+                }
+                val hosts = intent.getStringExtra("sites").orEmpty().split(',')
+                    .mapNotNull { FocusStore.hostOf(it) }
+                for (host in hosts) app.focus.removeSite(host, bypassLock = true)
+                "allowed ${hosts.joinToString(", ").ifEmpty { "nothing" }}; " +
+                    "blocked now: ${app.focus.blockedSites.value.sorted().joinToString(", ")}"
             }
             ACTION_LOCK -> {
                 app.lock.lock()
@@ -57,6 +82,8 @@ class UsbControl : BroadcastReceiver() {
 
     companion object {
         const val ACTION_UNLOCK = "app.pact.UNLOCK"
+        const val ACTION_RESET_TODAY = "app.pact.RESET_TODAY"
+        const val ACTION_ALLOW_SITE = "app.pact.ALLOW_SITE"
         const val ACTION_LOCK = "app.pact.LOCK"
         const val ACTION_RELEASE = "app.pact.RELEASE_ADMIN"
         const val ACTION_STATUS = "app.pact.STATUS"

@@ -50,6 +50,27 @@ class OverlayExclusionStore(context: Context) {
         }
     }
 
+    /**
+     * Counts all of today's [rawMs] as excluded, so today's adjusted usage restarts from zero.
+     * A cover that is open now keeps counting from this moment on.
+     */
+    fun excludeAllToday(rawMs: Map<String, Long>) {
+        synchronized(lock) {
+            rolloverLocked()
+            val nowElapsed = SystemClock.elapsedRealtime()
+            val covering = coveringPkg
+            flushCoveringLocked(nowElapsed)
+            val row = byDay.getOrPut(startOfDayMs()) { HashMap() }
+            for ((pkg, ms) in rawMs) {
+                if (ms > (row[pkg] ?: 0L)) row[pkg] = ms
+            }
+            persistDaysLocked()
+            coveringPkg = covering
+            coveringSinceElapsed = if (covering != null) nowElapsed else 0L
+            persistCoveringLocked()
+        }
+    }
+
     fun adjust(usage: DayUsage): DayUsage {
         if (usage.byPackage.isEmpty()) return usage
         synchronized(lock) {

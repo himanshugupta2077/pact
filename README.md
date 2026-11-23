@@ -47,11 +47,13 @@ Plug the phone into the Mac with USB debugging on, then:
 ```bash
 tools/pact-unlock        # unlock for 15 minutes (or: tools/pact-unlock 30, max 60)
 tools/pact-unlock lock   # lock again now
+tools/pact-unlock reset-today          # start today's counted time over at zero
+tools/pact-unlock allow-site youtube.com instagram.com   # stop blocking sites in browsers
 tools/pact-unlock status
 tools/pact-unlock release  # drop the device admin so `adb uninstall app.pact` works
 ```
 
-The unlock is refused unless the phone is plugged in with USB debugging on, and it ends on reboot.
+The unlock is refused unless the phone is plugged in with USB debugging on, and it ends on reboot. `reset-today` and `allow-site` need the same cable and USB debugging but not an unlock. `reset-today` hides today's earlier time from limits and the app screens; the upload to the VPS still reports what really happened.
 
 Pact itself, the default launcher, Settings, phone/dialer, and the permission controller are never blocked so you can recover.
 

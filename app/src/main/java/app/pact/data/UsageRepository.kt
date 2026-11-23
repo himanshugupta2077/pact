@@ -39,6 +39,21 @@ class UsageRepository(private val context: Context) {
         dayUsageUnlocked(startOfDayMs()).byPackage
     }
 
+    /**
+     * Starts today's counted time over at zero for every app and group.
+     * The system's usage log is untouched, so uploads still report what really happened.
+     * Returns how many apps had time to clear, or null when usage access is off.
+     */
+    fun resetToday(): Int? = synchronized(lock) {
+        if (!hasUsageAccess(context)) return@synchronized null
+        val now = System.currentTimeMillis()
+        val dayStart = startOfDayMs(now)
+        fillFromEvents(dayStart, now)
+        val raw = cache[dayStart]?.usage?.byPackage ?: emptyMap()
+        exclusions?.excludeAllToday(raw)
+        raw.size
+    }
+
     /** Foreground stretches from [dayStart] until [dayEnd], same clock as the limiter. */
     fun foregroundSpans(dayStart: Long, dayEnd: Long): List<UsageSpan> = synchronized(lock) {
         readClock(dayStart, dayEnd)?.spans?.toList() ?: emptyList()
